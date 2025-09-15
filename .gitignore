@@ -1,0 +1,20 @@
+# ESP-IDF build files
+build/
+sdkconfig
+sdkconfig.old
+
+# ESP-IDF tools installation flag
+.idf_tools_installed
+
+# IDE files
+.vscode/
+.idea/
+cmake-build-*/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.pyc

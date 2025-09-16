@@ -41,7 +41,7 @@ const char* html_page =
 "</head>"
 "<body>"
 "    <h1>Hello World!</h1>"
-"    <p>Welcome to CCABN Tracker</p>"
+"    <p>Welcome to CCABN Tracker (platformIO edition)</p>"
 "    <p>Device is running successfully.</p>"
 "</body>"
 "</html>";

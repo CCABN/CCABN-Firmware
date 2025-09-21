@@ -7,6 +7,9 @@
 #include "esp_wifi.h"
 #include "esp_netif.h"
 #include "esp_mac.h"
+#include "esp_system.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <string.h>
 
 static const char *TAG = "WiFiStateMachine";
@@ -182,12 +185,14 @@ wifi_sm_state_t state_connected_handler(wifi_sm_event_t event, void* data) {
 wifi_sm_state_t state_ap_mode_handler(wifi_sm_event_t event, void* data) {
     switch (event) {
         case WIFI_SM_EVENT_BUTTON_RELEASE:
-            // Return to appropriate state based on credentials
-            if (wifi_storage_has_credentials()) {
-                return WIFI_SM_CONNECTING;
-            } else {
-                return WIFI_SM_DISCONNECTED;
-            }
+            // Restart device when exiting AP mode for clean state
+            ESP_LOGI(TAG, "Exiting AP mode - restarting device for clean state");
+
+            // Give a brief delay to allow logging to complete
+            vTaskDelay(pdMS_TO_TICKS(100));
+
+            // Restart the device
+            esp_restart();
 
         case WIFI_SM_EVENT_CREDENTIALS_SAVED:
             // Stay in AP mode until user exits

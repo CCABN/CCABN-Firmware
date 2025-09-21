@@ -146,6 +146,31 @@ bool captive_portal_start() {
     };
     httpd_register_uri_handler(http_server, &connect_uri);
 
+    // Captive portal detection handlers - return HTTP 204 to indicate no internet
+    httpd_uri_t generate_204_uri = {
+        .uri = "/generate_204",
+        .method = HTTP_GET,
+        .handler = [](httpd_req_t *req) -> esp_err_t {
+            httpd_resp_set_status(req, "204 No Content");
+            httpd_resp_send(req, nullptr, 0);
+            return ESP_OK;
+        },
+        .user_ctx = nullptr
+    };
+    httpd_register_uri_handler(http_server, &generate_204_uri);
+
+    httpd_uri_t gen_204_uri = {
+        .uri = "/gen_204",
+        .method = HTTP_GET,
+        .handler = [](httpd_req_t *req) -> esp_err_t {
+            httpd_resp_set_status(req, "204 No Content");
+            httpd_resp_send(req, nullptr, 0);
+            return ESP_OK;
+        },
+        .user_ctx = nullptr
+    };
+    httpd_register_uri_handler(http_server, &gen_204_uri);
+
     httpd_uri_t catch_all_uri = {
         .uri = "/*",
         .method = HTTP_GET,

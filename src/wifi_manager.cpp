@@ -29,6 +29,10 @@ static bool is_pulsing = false;
 static wifi_state_t previous_led_state = WIFI_STATE_DISCONNECTED;
 static TaskHandle_t mode_change_task_handle = NULL;
 
+// Network interface tracking
+static esp_netif_t* ap_netif = NULL;
+static esp_netif_t* sta_netif = NULL;
+
 // Forward declarations
 static void button_isr_handler(void* arg);
 static void button_hold_callback(TimerHandle_t xTimer);
@@ -78,8 +82,19 @@ void wifi_manager_start_ap_mode(void) {
     ESP_LOGI(TAG, "Starting AP mode");
     current_state = WIFI_STATE_AP_MODE;
 
-    // Create AP network interface
-    esp_netif_create_default_wifi_ap();
+    // Stop WiFi if it's currently running
+    esp_wifi_stop();
+
+    // Destroy existing STA interface if it exists
+    if (sta_netif != NULL) {
+        esp_netif_destroy(sta_netif);
+        sta_netif = NULL;
+    }
+
+    // Create AP network interface only if it doesn't exist
+    if (ap_netif == NULL) {
+        ap_netif = esp_netif_create_default_wifi_ap();
+    }
 
     // Configure AP
     wifi_config_t wifi_config = {};
@@ -109,6 +124,12 @@ void wifi_manager_stop_ap_mode(void) {
     captive_portal_stop();
     esp_wifi_stop();
 
+    // Destroy AP interface
+    if (ap_netif != NULL) {
+        esp_netif_destroy(ap_netif);
+        ap_netif = NULL;
+    }
+
     status_led_stop_effects();
     status_led_set_state(true);  // Solid on when connected
 }
@@ -123,8 +144,19 @@ void wifi_manager_connect_sta(const char* ssid, const char* password) {
 
     current_state = WIFI_STATE_CONNECTING;
 
-    // Create STA network interface if not already created
-    esp_netif_create_default_wifi_sta();
+    // Stop WiFi if it's currently running
+    esp_wifi_stop();
+
+    // Destroy existing AP interface if it exists
+    if (ap_netif != NULL) {
+        esp_netif_destroy(ap_netif);
+        ap_netif = NULL;
+    }
+
+    // Create STA network interface only if it doesn't exist
+    if (sta_netif == NULL) {
+        sta_netif = esp_netif_create_default_wifi_sta();
+    }
 
     // Configure STA
     wifi_config_t wifi_config = {};

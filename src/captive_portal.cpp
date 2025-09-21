@@ -1,76 +1,105 @@
 #include "captive_portal.h"
-#include "wifi_manager.h"
+#include "network_scanner.h"
 #include "wifi_storage.h"
 #include "esp_log.h"
-#include "esp_wifi.h"
+#include "esp_http_server.h"
 #include "lwip/sockets.h"
-#include "lwip/dns.h"
-#include "esp_netif.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "cJSON.h"
 #include <string.h>
-#include <cJSON.h>
-#include <stdio.h>
 #include <fcntl.h>
 
-static const char *TAG = "CaptivePortal";
-static httpd_handle_t server = NULL;
-static wifi_ap_record_t* scanned_networks = NULL;
-static uint16_t network_count = 0;
+static const char *TAG = "CaptivePortalV2";
+
+// Portal state
+static captive_portal_config_t portal_config = {0};
+static bool is_initialized = false;
+static bool is_running = false;
+
+// Server handles
+static httpd_handle_t http_server = NULL;
 static TaskHandle_t dns_task_handle = NULL;
-static bool dns_server_running = false;
+static bool dns_task_running = false;
 
-// DNS server task for captive portal redirection
-static void dns_server_task(void *pvParameters);
+// Callback
+static credentials_saved_callback_t credentials_callback = NULL;
 
-// HTTP handlers
+// HTML template
+static char* html_template = NULL;
+
+// Forward declarations
+static void dns_server_task(void* parameter);
 static esp_err_t root_handler(httpd_req_t *req);
 static esp_err_t scan_handler(httpd_req_t *req);
 static esp_err_t connect_handler(httpd_req_t *req);
 static esp_err_t catch_all_handler(httpd_req_t *req);
+static bool load_html_template(void);
+static void cleanup_resources(void);
 
-// HTML content loaded from SPIFFS
-static char* html_template = nullptr;
-
-// Load HTML template from SPIFFS
-static bool load_html_template(void) {
-    FILE* file = fopen("/spiffs/setup.html", "r");
-    if (!file) {
-        ESP_LOGE(TAG, "Failed to open setup.html file from SPIFFS");
+bool captive_portal_init(const captive_portal_config_t* config) {
+    if (is_initialized) {
+        ESP_LOGW(TAG, "Portal already initialized");
         return false;
     }
 
-    // Get file size
-    fseek(file, 0, SEEK_END);
-    long file_size = ftell(file);
-    fseek(file, 0, SEEK_SET);
-
-    // Allocate memory for the content
-    html_template = (char*)malloc(file_size + 1);
-    if (!html_template) {
-        ESP_LOGE(TAG, "Failed to allocate memory for HTML template");
-        fclose(file);
+    if (!config) {
+        ESP_LOGE(TAG, "Invalid configuration");
         return false;
     }
 
-    // Read file content
-    size_t bytes_read = fread(html_template, 1, file_size, file);
-    html_template[bytes_read] = '\0';
+    ESP_LOGI(TAG, "Initializing captive portal");
 
-    fclose(file);
-    ESP_LOGI(TAG, "Loaded HTML template from SPIFFS (%d bytes)", (int)bytes_read);
+    // Copy configuration
+    portal_config = *config;
+    is_initialized = true;
+    is_running = false;
+
+    // Initialize resources
+    http_server = NULL;
+    dns_task_handle = NULL;
+    dns_task_running = false;
+    credentials_callback = NULL;
+    html_template = NULL;
+
+    ESP_LOGI(TAG, "Captive portal initialized");
     return true;
 }
 
-void captive_portal_start(void) {
+void captive_portal_deinit(void) {
+    if (!is_initialized) {
+        return;
+    }
+
+    ESP_LOGI(TAG, "Deinitializing captive portal");
+
+    captive_portal_stop();
+    cleanup_resources();
+
+    is_initialized = false;
+    ESP_LOGI(TAG, "Captive portal deinitialized");
+}
+
+bool captive_portal_start(void) {
+    if (!is_initialized) {
+        ESP_LOGE(TAG, "Portal not initialized");
+        return false;
+    }
+
+    if (is_running) {
+        ESP_LOGW(TAG, "Portal already running");
+        return true;
+    }
+
     ESP_LOGI(TAG, "Starting captive portal");
 
-    // Load HTML template from SPIFFS, fallback to simple template if file not found
+    // Load HTML template
     if (!load_html_template()) {
         ESP_LOGW(TAG, "Using fallback HTML template");
-        // Simple fallback HTML
         const char* fallback_html =
             "<!DOCTYPE html><html><body>"
             "<h1>CCABN Tracker Setup</h1>"
-            "<p>HTML template file not found. Please upload setup.html to SPIFFS using 'pio run --target uploadfs'</p>"
+            "<p>WiFi configuration interface</p>"
             "</body></html>";
 
         size_t len = strlen(fallback_html);
@@ -81,179 +110,165 @@ void captive_portal_start(void) {
     }
 
     // Start HTTP server
-    httpd_config_t config = HTTPD_DEFAULT_CONFIG();
-    config.lru_purge_enable = true;
+    httpd_config_t http_config = HTTPD_DEFAULT_CONFIG();
+    http_config.server_port = portal_config.http_port;
+    http_config.lru_purge_enable = true;
 
-    if (httpd_start(&server, &config) == ESP_OK) {
-        // Main page handler
-        httpd_uri_t root = {
-            .uri = "/",
-            .method = HTTP_GET,
-            .handler = root_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &root);
-
-        // Network scan handler
-        httpd_uri_t scan = {
-            .uri = "/scan",
-            .method = HTTP_GET,
-            .handler = scan_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &scan);
-
-        // WiFi connect handler
-        httpd_uri_t connect = {
-            .uri = "/connect",
-            .method = HTTP_POST,
-            .handler = connect_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &connect);
-
-        // Catch-all handler for captive portal
-        httpd_uri_t catch_all = {
-            .uri = "/*",
-            .method = HTTP_GET,
-            .handler = catch_all_handler,
-            .user_ctx = NULL
-        };
-        httpd_register_uri_handler(server, &catch_all);
-
-        ESP_LOGI(TAG, "HTTP server started");
+    esp_err_t err = httpd_start(&http_server, &http_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(err));
+        cleanup_resources();
+        return false;
     }
 
-    // Start DNS server for captive portal redirection
-    dns_server_running = true;
-    xTaskCreate(dns_server_task, "dns_server", 4096, NULL, 5, &dns_task_handle);
+    // Register handlers
+    httpd_uri_t root_uri = {
+        .uri = "/",
+        .method = HTTP_GET,
+        .handler = root_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(http_server, &root_uri);
+
+    httpd_uri_t scan_uri = {
+        .uri = "/scan",
+        .method = HTTP_GET,
+        .handler = scan_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(http_server, &scan_uri);
+
+    httpd_uri_t connect_uri = {
+        .uri = "/connect",
+        .method = HTTP_POST,
+        .handler = connect_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(http_server, &connect_uri);
+
+    httpd_uri_t catch_all_uri = {
+        .uri = "/*",
+        .method = HTTP_GET,
+        .handler = catch_all_handler,
+        .user_ctx = NULL
+    };
+    httpd_register_uri_handler(http_server, &catch_all_uri);
+
+    // Start DNS server
+    dns_task_running = true;
+    BaseType_t result = xTaskCreate(
+        dns_server_task,
+        "dns_server",
+        4096,
+        NULL,
+        5,
+        &dns_task_handle
+    );
+
+    if (result != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create DNS task");
+        httpd_stop(http_server);
+        http_server = NULL;
+        cleanup_resources();
+        return false;
+    }
+
+    is_running = true;
+    ESP_LOGI(TAG, "Captive portal started on port %d", portal_config.http_port);
+    return true;
 }
 
 void captive_portal_stop(void) {
+    if (!is_running) {
+        return;
+    }
+
     ESP_LOGI(TAG, "Stopping captive portal");
 
-    // Stop DNS server task
+    // Stop DNS server
+    dns_task_running = false;
     if (dns_task_handle != NULL) {
-        dns_server_running = false;
-        vTaskDelay(100 / portTICK_PERIOD_MS); // Give task time to see the flag
+        vTaskDelay(pdMS_TO_TICKS(100)); // Give task time to see the flag
 
-        // Force delete the task if it's still running
         if (eTaskGetState(dns_task_handle) != eDeleted) {
             vTaskDelete(dns_task_handle);
         }
         dns_task_handle = NULL;
     }
 
-    if (server) {
-        httpd_stop(server);
-        server = NULL;
+    // Stop HTTP server
+    if (http_server != NULL) {
+        httpd_stop(http_server);
+        http_server = NULL;
     }
 
-    if (scanned_networks) {
-        free(scanned_networks);
-        scanned_networks = NULL;
-        network_count = 0;
-    }
+    cleanup_resources();
+    is_running = false;
 
+    ESP_LOGI(TAG, "Captive portal stopped");
+}
+
+bool captive_portal_is_running(void) {
+    return is_running;
+}
+
+void captive_portal_set_credentials_callback(credentials_saved_callback_t callback) {
+    credentials_callback = callback;
+}
+
+// Private functions
+static void cleanup_resources(void) {
     if (html_template) {
         free(html_template);
         html_template = NULL;
     }
 }
 
-void captive_portal_scan_networks(void) {
-    ESP_LOGI(TAG, "Scanning for WiFi networks");
-
-    // Get current WiFi mode
-    wifi_mode_t current_mode;
-    esp_wifi_get_mode(&current_mode);
-
-    // WiFi scanning requires STA mode, so temporarily switch to APSTA mode
-    if (current_mode == WIFI_MODE_AP) {
-        ESP_LOGI(TAG, "Switching to APSTA mode for scanning");
-        esp_wifi_set_mode(WIFI_MODE_APSTA);
-        vTaskDelay(100 / portTICK_PERIOD_MS); // Give time for mode change
+static bool load_html_template(void) {
+    FILE* file = fopen("/spiffs/setup.html", "r");
+    if (!file) {
+        ESP_LOGD(TAG, "No HTML template file found in SPIFFS");
+        return false;
     }
 
-    wifi_scan_config_t scan_config = {};
-    esp_err_t scan_result = esp_wifi_scan_start(&scan_config, true);
+    fseek(file, 0, SEEK_END);
+    long file_size = ftell(file);
+    fseek(file, 0, SEEK_SET);
 
-    if (scan_result != ESP_OK) {
-        ESP_LOGE(TAG, "WiFi scan failed: %s", esp_err_to_name(scan_result));
-        // Restore original mode if scan failed
-        if (current_mode == WIFI_MODE_AP) {
-            esp_wifi_set_mode(WIFI_MODE_AP);
-        }
-        network_count = 0;
-        return;
+    html_template = (char*)malloc(file_size + 1);
+    if (!html_template) {
+        ESP_LOGE(TAG, "Failed to allocate memory for HTML template");
+        fclose(file);
+        return false;
     }
 
-    esp_err_t count_result = esp_wifi_scan_get_ap_num(&network_count);
-    if (count_result != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to get AP count: %s", esp_err_to_name(count_result));
-        network_count = 0;
-    }
+    size_t bytes_read = fread(html_template, 1, file_size, file);
+    html_template[bytes_read] = '\0';
 
-    if (scanned_networks) {
-        free(scanned_networks);
-        scanned_networks = NULL;
-    }
-
-    if (network_count > 0) {
-        scanned_networks = (wifi_ap_record_t*)malloc(sizeof(wifi_ap_record_t) * network_count);
-        if (scanned_networks) {
-            esp_err_t records_result = esp_wifi_scan_get_ap_records(&network_count, scanned_networks);
-            if (records_result != ESP_OK) {
-                ESP_LOGE(TAG, "Failed to get AP records: %s", esp_err_to_name(records_result));
-                free(scanned_networks);
-                scanned_networks = NULL;
-                network_count = 0;
-            }
-        } else {
-            ESP_LOGE(TAG, "Failed to allocate memory for scanned networks");
-            network_count = 0;
-        }
-    }
-
-    // Restore original WiFi mode
-    if (current_mode == WIFI_MODE_AP) {
-        ESP_LOGI(TAG, "Restoring AP mode");
-        esp_wifi_set_mode(WIFI_MODE_AP);
-    }
-
-    ESP_LOGI(TAG, "Found %d networks", network_count);
+    fclose(file);
+    ESP_LOGI(TAG, "Loaded HTML template (%d bytes)", (int)bytes_read);
+    return true;
 }
 
-// HTTP Handlers
 static esp_err_t root_handler(httpd_req_t *req) {
     if (html_template) {
         httpd_resp_set_type(req, "text/html");
         httpd_resp_send(req, html_template, strlen(html_template));
     } else {
-        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to load HTML template");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Template not available");
     }
     return ESP_OK;
 }
 
 static esp_err_t scan_handler(httpd_req_t *req) {
-    captive_portal_scan_networks();
+    char json_buffer[2048];
 
-    cJSON *json = cJSON_CreateArray();
-
-    for (int i = 0; i < network_count; i++) {
-        cJSON *network = cJSON_CreateObject();
-        cJSON_AddStringToObject(network, "ssid", (char*)scanned_networks[i].ssid);
-        cJSON_AddNumberToObject(network, "rssi", scanned_networks[i].rssi);
-        cJSON_AddItemToArray(json, network);
+    if (network_scanner_get_results_json(json_buffer, sizeof(json_buffer))) {
+        httpd_resp_set_type(req, "application/json");
+        httpd_resp_send(req, json_buffer, strlen(json_buffer));
+    } else {
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to get scan results");
     }
-
-    char *json_string = cJSON_Print(json);
-
-    httpd_resp_set_type(req, "application/json");
-    httpd_resp_send(req, json_string, strlen(json_string));
-
-    free(json_string);
-    cJSON_Delete(json);
 
     return ESP_OK;
 }
@@ -293,83 +308,88 @@ static esp_err_t connect_handler(httpd_req_t *req) {
     const char* ssid = ssid_json->valuestring;
     const char* password = password_json->valuestring;
 
-    ESP_LOGI(TAG, "Connecting to WiFi: %s", ssid);
+    ESP_LOGI(TAG, "Saving WiFi credentials: %s", ssid);
 
     // Save credentials to NVS
-    if (wifi_storage_save_credentials(ssid, password)) {
+    bool save_success = wifi_storage_save_credentials(ssid, password);
+
+    if (save_success) {
         ESP_LOGI(TAG, "WiFi credentials saved successfully");
+        httpd_resp_send(req, "Credentials saved. Exit AP mode to connect.",
+                       strlen("Credentials saved. Exit AP mode to connect."));
+
+        // Call callback if set
+        if (credentials_callback) {
+            credentials_callback(ssid, password);
+        }
     } else {
         ESP_LOGW(TAG, "Failed to save WiFi credentials");
+        httpd_resp_send_err(req, HTTPD_500_INTERNAL_SERVER_ERROR, "Failed to save credentials");
     }
 
-    wifi_manager_connect_sta(ssid, password);
-
-    httpd_resp_send(req, "OK", 2);
     cJSON_Delete(json);
-
     return ESP_OK;
 }
 
 static esp_err_t catch_all_handler(httpd_req_t *req) {
-    // Redirect all requests to root for captive portal
+    // Redirect all requests to root for captive portal behavior
     return root_handler(req);
 }
 
-// DNS Server for captive portal redirection
-static void dns_server_task(void *pvParameters) {
+static void dns_server_task(void* parameter) {
+    ESP_LOGI(TAG, "DNS server task started");
+
     struct sockaddr_in server_addr;
     int sock = -1;
     char rx_buffer[128];
 
-    ESP_LOGI(TAG, "DNS server task started");
-
-    while (dns_server_running) {
+    while (dns_task_running) {
         sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
         if (sock < 0) {
-            ESP_LOGE(TAG, "Unable to create socket: errno %d", errno);
+            ESP_LOGE(TAG, "Unable to create DNS socket: errno %d", errno);
             break;
         }
 
-        // Set socket to non-blocking to allow checking the running flag
+        // Set socket to non-blocking
         int flags = fcntl(sock, F_GETFL, 0);
         fcntl(sock, F_SETFL, flags | O_NONBLOCK);
 
         server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
         server_addr.sin_family = AF_INET;
-        server_addr.sin_port = htons(53);
+        server_addr.sin_port = htons(portal_config.dns_port);
 
         int err = bind(sock, (struct sockaddr *)&server_addr, sizeof(server_addr));
         if (err < 0) {
-            ESP_LOGE(TAG, "Socket unable to bind: errno %d", errno);
+            ESP_LOGE(TAG, "DNS socket bind failed: errno %d", errno);
             close(sock);
             sock = -1;
-            vTaskDelay(1000 / portTICK_PERIOD_MS);
+            vTaskDelay(pdMS_TO_TICKS(1000));
             continue;
         }
 
-        ESP_LOGI(TAG, "DNS Server listening on port 53");
+        ESP_LOGI(TAG, "DNS server listening on port %d", portal_config.dns_port);
 
-        while (dns_server_running) {
+        while (dns_task_running) {
             struct sockaddr_storage source_addr;
             socklen_t socklen = sizeof(source_addr);
-            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0, (struct sockaddr *)&source_addr, &socklen);
+            int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0,
+                              (struct sockaddr *)&source_addr, &socklen);
 
             if (len < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                    // No data available, check if we should continue running
-                    vTaskDelay(10 / portTICK_PERIOD_MS);
+                    vTaskDelay(pdMS_TO_TICKS(10));
                     continue;
                 } else {
-                    ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+                    ESP_LOGE(TAG, "DNS recvfrom failed: errno %d", errno);
                     break;
                 }
             }
 
-            if (!dns_server_running) {
+            if (!dns_task_running) {
                 break;
             }
 
-            // Create DNS response redirecting to 192.168.4.1
+            // Create simple DNS response redirecting to AP IP
             char dns_reply[128];
             int reply_len = 12;
             memcpy(dns_reply, rx_buffer, 12);
@@ -380,6 +400,7 @@ static void dns_server_task(void *pvParameters) {
             memcpy(dns_reply + 12, rx_buffer + 12, len - 12);
             reply_len += len - 12;
 
+            // Add answer section pointing to 192.168.4.1
             dns_reply[reply_len++] = 0xC0;
             dns_reply[reply_len++] = 0x0C;
             dns_reply[reply_len++] = 0x00;
@@ -397,14 +418,14 @@ static void dns_server_task(void *pvParameters) {
             dns_reply[reply_len++] = 4;
             dns_reply[reply_len++] = 1;
 
-            sendto(sock, dns_reply, reply_len, 0, (struct sockaddr *)&source_addr, sizeof(source_addr));
+            sendto(sock, dns_reply, reply_len, 0, (struct sockaddr *)&source_addr, socklen);
         }
 
         if (sock >= 0) {
             close(sock);
             sock = -1;
         }
-        break; // Exit the outer loop when dns_server_running becomes false
+        break;
     }
 
     ESP_LOGI(TAG, "DNS server task stopped");

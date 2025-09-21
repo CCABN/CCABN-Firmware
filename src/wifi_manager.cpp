@@ -85,37 +85,35 @@ void wifi_manager_start_ap_mode(void) {
     // Stop WiFi if it's currently running
     esp_wifi_stop();
 
-    // Destroy existing STA interface if it exists
-    if (sta_netif != NULL) {
-        esp_netif_destroy(sta_netif);
-        sta_netif = NULL;
+    // Create both STA and AP interfaces for APSTA mode
+    if (sta_netif == NULL) {
+        sta_netif = esp_netif_create_default_wifi_sta();
     }
-
-    // Create AP network interface only if it doesn't exist
     if (ap_netif == NULL) {
         ap_netif = esp_netif_create_default_wifi_ap();
     }
 
     // Configure AP
-    wifi_config_t wifi_config = {};
-    strcpy((char*)wifi_config.ap.ssid, device_name);
-    wifi_config.ap.ssid_len = strlen(device_name);
-    wifi_config.ap.password[0] = '\0';  // Open network
-    wifi_config.ap.channel = AP_CHANNEL;
-    wifi_config.ap.max_connection = AP_MAX_CONNECTIONS;
-    wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    wifi_config_t ap_config = {};
+    strcpy((char*)ap_config.ap.ssid, device_name);
+    ap_config.ap.ssid_len = strlen(device_name);
+    ap_config.ap.password[0] = '\0';  // Open network
+    ap_config.ap.channel = AP_CHANNEL;
+    ap_config.ap.max_connection = AP_MAX_CONNECTIONS;
+    ap_config.ap.authmode = WIFI_AUTH_OPEN;
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    // Set to APSTA mode for continuous scanning capability
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
     ESP_ERROR_CHECK(esp_wifi_start());
 
-    // Start captive portal
+    // Start captive portal (which will handle continuous scanning)
     captive_portal_start();
 
     // Set LED to blink mode
     status_led_start_blink();
 
-    ESP_LOGI(TAG, "AP mode started. SSID: %s", device_name);
+    ESP_LOGI(TAG, "AP mode started in APSTA mode. SSID: %s", device_name);
 }
 
 void wifi_manager_stop_ap_mode(void) {

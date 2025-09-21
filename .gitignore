@@ -2,6 +2,7 @@
 build/
 sdkconfig
 sdkconfig.old
+.pio/
 
 # ESP-IDF tools installation flag
 .idf_tools_installed

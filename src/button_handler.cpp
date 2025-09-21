@@ -71,7 +71,7 @@ bool button_handler_init(const button_config_t* config) {
     }
 
     // Add ISR handler
-    ret = gpio_isr_handler_add((gpio_num_t)button_config.gpio_pin, button_isr_handler, NULL);
+    ret = gpio_isr_handler_add(static_cast<gpio_num_t>(button_config.gpio_pin), button_isr_handler, nullptr);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add ISR handler: %s", esp_err_to_name(ret));
         return false;
@@ -82,13 +82,13 @@ bool button_handler_init(const button_config_t* config) {
         "button_hold",
         pdMS_TO_TICKS(button_config.hold_time_ms),
         pdFALSE,  // One-shot timer
-        NULL,
+        nullptr,
         button_hold_timer_callback
     );
 
     if (!hold_timer) {
         ESP_LOGE(TAG, "Failed to create hold timer");
-        gpio_isr_handler_remove((gpio_num_t)button_config.gpio_pin);
+        gpio_isr_handler_remove(static_cast<gpio_num_t>(button_config.gpio_pin));
         return false;
     }
 
@@ -110,13 +110,13 @@ void button_handler_deinit(void) {
     ESP_LOGI(TAG, "Deinitializing button handler");
 
     // Remove ISR handler
-    gpio_isr_handler_remove((gpio_num_t)button_config.gpio_pin);
+    gpio_isr_handler_remove(static_cast<gpio_num_t>(button_config.gpio_pin));
 
     // Delete timer
     if (hold_timer) {
         xTimerStop(hold_timer, 0);
         xTimerDelete(hold_timer, 0);
-        hold_timer = NULL;
+        hold_timer = nullptr;
     }
 
     is_initialized = false;
@@ -132,14 +132,14 @@ bool button_handler_is_pressed(void) {
         return false;
     }
 
-    const int level = gpio_get_level((gpio_num_t)button_config.gpio_pin);
+    const int level = gpio_get_level(static_cast<gpio_num_t>(button_config.gpio_pin));
     return button_config.active_high ? (level == 1) : (level == 0);
 }
 
 // Private functions
 static void IRAM_ATTR button_isr_handler(void* arg) {
     BaseType_t higher_priority_task_woken = pdFALSE;
-    bool current_pressed = button_handler_is_pressed();
+    const bool current_pressed = button_handler_is_pressed();
 
     if (current_pressed && !button_pressed) {
         // Button just pressed
@@ -194,13 +194,13 @@ static void button_hold_timer_callback(TimerHandle_t timer) {
     status_led_state_changed();
 
     // Get current state and send appropriate event
-    wifi_sm_state_t current_state = wifi_state_machine_get_state();
+    const wifi_sm_state_t current_state = wifi_state_machine_get_state();
 
     if (current_state == WIFI_SM_AP_MODE) {
         // Exit AP mode
-        wifi_state_machine_send_event(WIFI_SM_EVENT_BUTTON_RELEASE, NULL);
+        wifi_state_machine_send_event(WIFI_SM_EVENT_BUTTON_RELEASE, nullptr);
     } else {
         // Enter AP mode
-        wifi_state_machine_send_event(WIFI_SM_EVENT_BUTTON_HOLD, NULL);
+        wifi_state_machine_send_event(WIFI_SM_EVENT_BUTTON_HOLD, nullptr);
     }
 }

@@ -2,7 +2,7 @@
 #include "esp_log.h"
 #include "nvs.h"
 #include "nvs_flash.h"
-#include <string.h>
+#include <cstring>
 
 static const char *TAG = "WiFiStorage";
 static const char *STORAGE_NAMESPACE = "wifi_config";
@@ -83,7 +83,7 @@ bool wifi_storage_save_credentials(const char* ssid, const char* password) {
     return true;
 }
 
-bool wifi_storage_clear_credentials(void) {
+bool wifi_storage_clear_credentials() {
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handle);
 
@@ -101,7 +101,7 @@ bool wifi_storage_clear_credentials(void) {
     return true;
 }
 
-bool wifi_storage_has_credentials(void) {
+bool wifi_storage_has_credentials() {
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READONLY, &nvs_handle);
 
@@ -110,7 +110,7 @@ bool wifi_storage_has_credentials(void) {
     }
 
     size_t required_size = 0;
-    err = nvs_get_str(nvs_handle, SSID_KEY, NULL, &required_size);
+    err = nvs_get_str(nvs_handle, SSID_KEY, nullptr, &required_size);
     nvs_close(nvs_handle);
 
     return (err == ESP_OK && required_size > 0);

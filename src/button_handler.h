@@ -1,8 +1,8 @@
 #ifndef BUTTON_HANDLER_H
 #define BUTTON_HANDLER_H
 
-#include <stdbool.h>
-#include <stdint.h>
+// ReSharper disable once CppUnusedIncludeDirective
+#include <cstdint> // Despite what Clion says, this is needed
 
 // Button configuration
 typedef struct {
@@ -14,10 +14,10 @@ typedef struct {
 
 // Function declarations
 bool button_handler_init(const button_config_t* config);
-void button_handler_deinit(void);
+void button_handler_deinit();
 
 // Status
-bool button_handler_is_initialized(void);
-bool button_handler_is_pressed(void);
+bool button_handler_is_initialized();
+bool button_handler_is_pressed();
 
 #endif // BUTTON_HANDLER_H

@@ -23,7 +23,7 @@ extern "C" void app_main(void)
     // Initialize SPIFFS filesystem
     esp_vfs_spiffs_conf_t conf = {
         .base_path = "/spiffs",
-        .partition_label = NULL,
+        .partition_label = nullptr,
         .max_files = 5,
         .format_if_mount_failed = false
     };
@@ -34,7 +34,7 @@ extern "C" void app_main(void)
         ESP_LOGI(TAG, "SPIFFS mounted successfully");
     }
 
-    // Initialize WiFi state machine
+    // Initialize Wi-Fi state machine
     wifi_state_machine_init();
 
     // Initialize button handler
@@ -55,7 +55,8 @@ extern "C" void app_main(void)
 
     // Main loop - just keep the task alive
     // All functionality is now handled by the state machine and modules
-    while (1) {
+    // ReSharper disable once CppDFAEndlessLoop
+    while (true) {
         vTaskDelay(pdMS_TO_TICKS(10000)); // Sleep for 10 seconds
     }
 }

@@ -9,8 +9,8 @@
 static const char *TAG = "NetworkScanner";
 
 // Scanner state
-static network_scanner_config_t scanner_config = {0};
-static TaskHandle_t scan_task_handle = NULL;
+static network_scanner_config_t scanner_config = {};
+static TaskHandle_t scan_task_handle = nullptr;
 static bool task_should_run = false;
 
 // Scan results
@@ -32,7 +32,7 @@ void network_scanner_init(void) {
     result_count = 0;
     scan_in_progress = false;
     task_should_run = false;
-    scan_task_handle = NULL;
+    scan_task_handle = nullptr;
 
     ESP_LOGI(TAG, "Network scanner initialized");
 }
@@ -66,7 +66,7 @@ bool network_scanner_start_continuous(uint32_t interval_ms) {
         continuous_scan_task,
         "net_scan",
         4096,
-        NULL,
+        nullptr,
         4,
         &scan_task_handle
     );
@@ -91,7 +91,7 @@ void network_scanner_stop_continuous(void) {
     task_should_run = false;
     scanner_config.continuous_scan = false;
 
-    if (scan_task_handle != NULL) {
+    if (scan_task_handle != nullptr) {
         // Wait for task to finish gracefully
         vTaskDelay(pdMS_TO_TICKS(100));
 
@@ -99,7 +99,7 @@ void network_scanner_stop_continuous(void) {
         if (eTaskGetState(scan_task_handle) != eDeleted) {
             vTaskDelete(scan_task_handle);
         }
-        scan_task_handle = NULL;
+        scan_task_handle = nullptr;
     }
 
     scanner_config.active = false;
@@ -176,6 +176,7 @@ bool network_scanner_is_scanning(void) {
 static void continuous_scan_task(void* parameter) {
     ESP_LOGI(TAG, "Continuous scan task started");
 
+    // ReSharper disable once CppDFALoopConditionNotUpdated
     while (task_should_run) {
         perform_scan();
 
@@ -186,7 +187,7 @@ static void continuous_scan_task(void* parameter) {
     }
 
     ESP_LOGI(TAG, "Continuous scan task stopped");
-    vTaskDelete(NULL);
+    vTaskDelete(nullptr);
 }
 
 static bool perform_scan(void) {
@@ -196,8 +197,8 @@ static bool perform_scan(void) {
 
     scan_in_progress = true;
 
-    // Perform WiFi scan
-    wifi_scan_config_t scan_config = {0};
+    // Perform Wi-Fi scan
+    wifi_scan_config_t scan_config = {};
     esp_err_t err = esp_wifi_scan_start(&scan_config, true);
 
     if (err != ESP_OK) {
@@ -226,7 +227,7 @@ static bool perform_scan(void) {
         ap_count = MAX_SCAN_RESULTS;
     }
 
-    wifi_ap_record_t *ap_records = (wifi_ap_record_t*)malloc(sizeof(wifi_ap_record_t) * ap_count);
+    wifi_ap_record_t *ap_records = static_cast<wifi_ap_record_t *>(malloc(sizeof(wifi_ap_record_t) * ap_count));
     if (!ap_records) {
         ESP_LOGE(TAG, "Failed to allocate memory for scan results");
         scan_in_progress = false;
@@ -244,7 +245,7 @@ static bool perform_scan(void) {
     // Copy results to our structure
     result_count = ap_count;
     for (int i = 0; i < ap_count; i++) {
-        strncpy(scan_results[i].ssid, (char*)ap_records[i].ssid, sizeof(scan_results[i].ssid) - 1);
+        strncpy(scan_results[i].ssid, reinterpret_cast<char *>(ap_records[i].ssid), sizeof(scan_results[i].ssid) - 1);
         scan_results[i].ssid[sizeof(scan_results[i].ssid) - 1] = '\0';
         scan_results[i].rssi = ap_records[i].rssi;
         scan_results[i].authmode = ap_records[i].authmode;

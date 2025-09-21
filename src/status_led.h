@@ -1,12 +1,11 @@
 #ifndef STATUS_LED_H
 #define STATUS_LED_H
 
-#include <stdbool.h>
 #include <stdint.h>
 
-// LED patterns corresponding to WiFi states
+// LED patterns corresponding to Wi-Fi states
 typedef enum {
-    LED_PATTERN_SOLID,         // Solid on - WiFi connected
+    LED_PATTERN_SOLID,         // Solid on - Wi-Fi connected
     LED_PATTERN_PULSE,         // Breathing/pulsing - connecting/disconnected
     LED_PATTERN_BLINK,         // Blinking - AP mode
     LED_PATTERN_OFF,           // Forced off - button pressed

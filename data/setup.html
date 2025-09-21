@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html>
+<html lang="">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -80,14 +80,14 @@
 <body>
     <div class="container">
         <h1>CCABN Tracker Setup</h1>
-        <p>Select your WiFi network:</p>
+        <p>Select your Wi-Fi network:</p>
 
         <div id="networks" class="network-list">
             <div class="loading">Scanning for networks...</div>
         </div>
 
         <div id="password-section" style="display: none;">
-            <input type="password" id="password" placeholder="WiFi Password">
+            <label for="password"></label><input type="password" id="password" placeholder="WiFi Password">
             <button onclick="connectToWifi()">Connect</button>
         </div>
 
@@ -116,6 +116,7 @@
             container.innerHTML = '';
 
             networks.forEach(network => {
+                network.rssi = undefined;
                 const div = document.createElement('div');
                 div.className = 'network-item';
                 div.onclick = () => selectNetwork(network.ssid, div);

@@ -16,8 +16,8 @@ static const char *TAG = "WiFiStateMachine";
 static wifi_state_machine_t state_machine = {};
 
 // Network interfaces
-static esp_netif_t* sta_netif = NULL;
-static esp_netif_t* ap_netif = NULL;
+static esp_netif_t* sta_netif = nullptr;
+static esp_netif_t* ap_netif = nullptr;
 
 // Forward declarations
 static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
@@ -77,7 +77,7 @@ void wifi_state_machine_init(void) {
     ESP_LOGI(TAG, "WiFi state machine initialized with device name: %s", state_machine.device_name);
 
     // Start in disconnected state
-    wifi_state_machine_send_event(WIFI_SM_EVENT_INIT, NULL);
+    wifi_state_machine_send_event(WIFI_SM_EVENT_INIT, nullptr);
 }
 
 wifi_sm_state_t wifi_state_machine_get_state(void) {
@@ -217,20 +217,20 @@ void state_connecting_enter(void) {
     wifi_credentials_t credentials;
     if (!wifi_storage_load_credentials(&credentials)) {
         ESP_LOGE(TAG, "Failed to load credentials in CONNECTING state");
-        wifi_state_machine_send_event(WIFI_SM_EVENT_CONNECT_FAILED, NULL);
+        wifi_state_machine_send_event(WIFI_SM_EVENT_CONNECT_FAILED, nullptr);
         return;
     }
 
     // Create STA interface if needed
-    if (sta_netif == NULL) {
+    if (sta_netif == nullptr) {
         sta_netif = esp_netif_create_default_wifi_sta();
     }
 
-    // Configure and start WiFi connection
+    // Configure and start Wi-Fi connection
     // Use C++ style value initialization {} instead of C-style {0}
     wifi_config_t wifi_config = {};
-    strncpy((char*)wifi_config.sta.ssid, credentials.ssid, sizeof(wifi_config.sta.ssid) - 1);
-    strncpy((char*)wifi_config.sta.password, credentials.password, sizeof(wifi_config.sta.password) - 1);
+    strncpy(reinterpret_cast<char *>(wifi_config.sta.ssid), credentials.ssid, sizeof(wifi_config.sta.ssid) - 1);
+    strncpy(reinterpret_cast<char *>(wifi_config.sta.password), credentials.password, sizeof(wifi_config.sta.password) - 1);
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -255,26 +255,26 @@ void state_connected_enter(void) {
 void state_ap_mode_enter(void) {
     ESP_LOGI(TAG, "Entering AP_MODE state");
 
-    // Stop WiFi and clean up STA interface
+    // Stop Wi-Fi and clean up STA interface
     esp_wifi_stop();
 
-    if (sta_netif != NULL) {
+    if (sta_netif != nullptr) {
         esp_netif_destroy(sta_netif);
-        sta_netif = NULL;
+        sta_netif = nullptr;
     }
 
     // Create both interfaces for APSTA mode
-    if (sta_netif == NULL) {
+    if (sta_netif == nullptr) {
         sta_netif = esp_netif_create_default_wifi_sta();
     }
-    if (ap_netif == NULL) {
+    if (ap_netif == nullptr) {
         ap_netif = esp_netif_create_default_wifi_ap();
     }
 
     // Configure AP
     // Use C++ style value initialization {} instead of C-style {0}
     wifi_config_t ap_config = {};
-    strncpy((char*)ap_config.ap.ssid, state_machine.device_name, sizeof(ap_config.ap.ssid) - 1);
+    strncpy(reinterpret_cast<char *>(ap_config.ap.ssid), state_machine.device_name, sizeof(ap_config.ap.ssid) - 1);
     ap_config.ap.ssid_len = strlen(state_machine.device_name);
     ap_config.ap.password[0] = '\0';  // Open network
     ap_config.ap.channel = 1;
@@ -321,13 +321,13 @@ void state_ap_mode_exit(void) {
     // Stop network scanner
     network_scanner_stop_continuous();
 
-    // Stop WiFi
+    // Stop Wi-Fi
     esp_wifi_stop();
 
     // Clean up AP interface
-    if (ap_netif != NULL) {
+    if (ap_netif != nullptr) {
         esp_netif_destroy(ap_netif);
-        ap_netif = NULL;
+        ap_netif = nullptr;
     }
 }
 
@@ -425,26 +425,26 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
         switch (event_id) {
             case WIFI_EVENT_STA_CONNECTED:
                 ESP_LOGI(TAG, "WiFi connected");
-                wifi_state_machine_send_event(WIFI_SM_EVENT_CONNECT_SUCCESS, NULL);
+                wifi_state_machine_send_event(WIFI_SM_EVENT_CONNECT_SUCCESS, nullptr);
                 break;
 
             case WIFI_EVENT_STA_DISCONNECTED:
                 ESP_LOGI(TAG, "WiFi disconnected");
                 if (state_machine.current_state == WIFI_SM_CONNECTED) {
-                    wifi_state_machine_send_event(WIFI_SM_EVENT_DISCONNECT, NULL);
+                    wifi_state_machine_send_event(WIFI_SM_EVENT_DISCONNECT, nullptr);
                 } else if (state_machine.current_state == WIFI_SM_CONNECTING) {
-                    wifi_state_machine_send_event(WIFI_SM_EVENT_CONNECT_FAILED, NULL);
+                    wifi_state_machine_send_event(WIFI_SM_EVENT_CONNECT_FAILED, nullptr);
                 }
                 break;
 
             case WIFI_EVENT_AP_STACONNECTED: {
-                wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+                wifi_event_ap_staconnected_t* event = static_cast<wifi_event_ap_staconnected_t *>(event_data);
                 ESP_LOGI(TAG, "Station connected to AP: " MACSTR, MAC2STR(event->mac));
                 break;
             }
 
             case WIFI_EVENT_AP_STADISCONNECTED: {
-                wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+                wifi_event_ap_stadisconnected_t* event = static_cast<wifi_event_ap_stadisconnected_t *>(event_data);
                 ESP_LOGI(TAG, "Station disconnected from AP: " MACSTR, MAC2STR(event->mac));
                 break;
             }
@@ -458,5 +458,5 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
 // Captive portal callback
 static void credentials_saved_callback(const char* ssid, const char* password) {
     ESP_LOGI(TAG, "Credentials saved via captive portal: %s", ssid);
-    wifi_state_machine_send_event(WIFI_SM_EVENT_CREDENTIALS_SAVED, NULL);
+    wifi_state_machine_send_event(WIFI_SM_EVENT_CREDENTIALS_SAVED, nullptr);
 }

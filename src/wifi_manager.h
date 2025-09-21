@@ -1,8 +1,8 @@
 #ifndef WIFI_MANAGER_H
 #define WIFI_MANAGER_H
 
+// ReSharper disable once CppUnusedIncludeDirective
 #include "esp_wifi.h"
-#include "esp_event.h"
 #include "esp_http_server.h"
 
 // Pin definitions - easily changeable
@@ -14,7 +14,7 @@
 #define AP_MAX_CONNECTIONS  4
 #define BUTTON_HOLD_TIME_MS 3000
 
-// WiFi manager states
+// Wi-Fi manager states
 typedef enum {
     WIFI_STATE_DISCONNECTED,
     WIFI_STATE_CONNECTING,
@@ -23,21 +23,21 @@ typedef enum {
 } wifi_state_t;
 
 // Function declarations
-void wifi_manager_init(void);
-void wifi_manager_start_ap_mode(void);
-void wifi_manager_stop_ap_mode(void);
+void wifi_manager_init();
+void wifi_manager_start_ap_mode();
+void wifi_manager_stop_ap_mode();
 void wifi_manager_connect_sta(const char* ssid, const char* password);
-wifi_state_t wifi_manager_get_state(void);
-char* wifi_manager_get_device_name(void);
+wifi_state_t wifi_manager_get_state();
+char* wifi_manager_get_device_name();
 
 // Status LED control
-void status_led_init(void);
+void status_led_init();
 void status_led_set_state(bool on);
-void status_led_start_pulse(void);
-void status_led_start_blink(void);
-void status_led_stop_effects(void);
+void status_led_start_pulse();
+void status_led_start_blink();
+void status_led_stop_effects();
 
 // Button handling
-void button_init(void);
+void button_init();
 
 #endif // WIFI_MANAGER_H

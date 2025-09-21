@@ -9,29 +9,27 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/timers.h"
-#include "nvs_flash.h"
-#include "nvs.h"
-#include <string.h>
-#include <math.h>
+#include <cstring>
+#include <cmath>
 
 static const char *TAG = "WiFiManager";
 
 // Global state
 static wifi_state_t current_state = WIFI_STATE_DISCONNECTED;
 static char device_name[32];
-static TimerHandle_t led_timer = NULL;
-static TimerHandle_t button_timer = NULL;
+static TimerHandle_t led_timer = nullptr;
+static TimerHandle_t button_timer = nullptr;
 static bool button_pressed = false;
 static bool led_blink_state = false;
 static uint8_t pulse_direction = 1;  // 1 for increasing, 0 for decreasing
 static uint8_t pulse_brightness = 0;
 static bool is_pulsing = false;
 static wifi_state_t previous_led_state = WIFI_STATE_DISCONNECTED;
-static TaskHandle_t mode_change_task_handle = NULL;
+static TaskHandle_t mode_change_task_handle = nullptr;
 
 // Network interface tracking
-static esp_netif_t* ap_netif = NULL;
-static esp_netif_t* sta_netif = NULL;
+static esp_netif_t* ap_netif = nullptr;
+static esp_netif_t* sta_netif = nullptr;
 
 // Forward declarations
 static void button_isr_handler(void* arg);
@@ -40,7 +38,7 @@ static void mode_change_task(void* pvParameters);
 static void led_pulse_callback(TimerHandle_t xTimer);
 static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data);
 
-void wifi_manager_init(void) {
+void wifi_manager_init() {
     // Generate device name from MAC address
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
@@ -63,10 +61,10 @@ void wifi_manager_init(void) {
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
                                                         ESP_EVENT_ANY_ID,
                                                         &wifi_event_handler,
-                                                        NULL,
-                                                        NULL));
+                                                        nullptr,
+                                                        nullptr));
 
-    // Try to load and connect to saved WiFi credentials
+    // Try to load and connect to saved Wi-Fi credentials
     wifi_credentials_t saved_credentials;
     if (wifi_storage_has_credentials() && wifi_storage_load_credentials(&saved_credentials)) {
         ESP_LOGI(TAG, "Found saved WiFi credentials, attempting to connect");
@@ -78,24 +76,24 @@ void wifi_manager_init(void) {
     }
 }
 
-void wifi_manager_start_ap_mode(void) {
+void wifi_manager_start_ap_mode() {
     ESP_LOGI(TAG, "Starting AP mode");
     current_state = WIFI_STATE_AP_MODE;
 
-    // Stop WiFi if it's currently running
+    // Stop Wi-Fi if it's currently running
     esp_wifi_stop();
 
     // Create both STA and AP interfaces for APSTA mode
-    if (sta_netif == NULL) {
+    if (sta_netif == nullptr) {
         sta_netif = esp_netif_create_default_wifi_sta();
     }
-    if (ap_netif == NULL) {
+    if (ap_netif == nullptr) {
         ap_netif = esp_netif_create_default_wifi_ap();
     }
 
     // Configure AP
     wifi_config_t ap_config = {};
-    strcpy((char*)ap_config.ap.ssid, device_name);
+    strcpy(reinterpret_cast<char *>(ap_config.ap.ssid), device_name);
     ap_config.ap.ssid_len = strlen(device_name);
     ap_config.ap.password[0] = '\0';  // Open network
     ap_config.ap.channel = AP_CHANNEL;
@@ -116,16 +114,16 @@ void wifi_manager_start_ap_mode(void) {
     ESP_LOGI(TAG, "AP mode started in APSTA mode. SSID: %s", device_name);
 }
 
-void wifi_manager_stop_ap_mode(void) {
+void wifi_manager_stop_ap_mode() {
     ESP_LOGI(TAG, "Stopping AP mode");
 
     captive_portal_stop();
     esp_wifi_stop();
 
     // Destroy AP interface
-    if (ap_netif != NULL) {
+    if (ap_netif != nullptr) {
         esp_netif_destroy(ap_netif);
-        ap_netif = NULL;
+        ap_netif = nullptr;
     }
 
     status_led_stop_effects();
@@ -142,24 +140,24 @@ void wifi_manager_connect_sta(const char* ssid, const char* password) {
 
     current_state = WIFI_STATE_CONNECTING;
 
-    // Stop WiFi if it's currently running
+    // Stop Wi-Fi if it's currently running
     esp_wifi_stop();
 
     // Destroy existing AP interface if it exists
-    if (ap_netif != NULL) {
+    if (ap_netif != nullptr) {
         esp_netif_destroy(ap_netif);
-        ap_netif = NULL;
+        ap_netif = nullptr;
     }
 
     // Create STA network interface only if it doesn't exist
-    if (sta_netif == NULL) {
+    if (sta_netif == nullptr) {
         sta_netif = esp_netif_create_default_wifi_sta();
     }
 
     // Configure STA
     wifi_config_t wifi_config = {};
-    strcpy((char*)wifi_config.sta.ssid, ssid);
-    strcpy((char*)wifi_config.sta.password, password);
+    strcpy(reinterpret_cast<char *>(wifi_config.sta.ssid), ssid);
+    strcpy(reinterpret_cast<char *>(wifi_config.sta.password), password);
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
@@ -170,16 +168,16 @@ void wifi_manager_connect_sta(const char* ssid, const char* password) {
     status_led_start_pulse();
 }
 
-wifi_state_t wifi_manager_get_state(void) {
+wifi_state_t wifi_manager_get_state() {
     return current_state;
 }
 
-char* wifi_manager_get_device_name(void) {
+char* wifi_manager_get_device_name() {
     return device_name;
 }
 
 // Status LED functions
-void status_led_init(void) {
+void status_led_init() {
     // Configure LEDC timer
     ledc_timer_config_t ledc_timer = {};
     ledc_timer.speed_mode = LEDC_LOW_SPEED_MODE;
@@ -201,20 +199,20 @@ void status_led_init(void) {
     ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
 
     // Create timer for LED effects
-    led_timer = xTimerCreate("led_timer", pdMS_TO_TICKS(50), pdTRUE, NULL, led_pulse_callback);
+    led_timer = xTimerCreate("led_timer", pdMS_TO_TICKS(50), pdTRUE, nullptr, led_pulse_callback);
 
     // Start with LED on (normal operation)
     status_led_set_state(true);
 }
 
-void status_led_set_state(bool on) {
+void status_led_set_state(const bool on) {
     is_pulsing = false;
     // Safe to use ESP_ERROR_CHECK here since it's not called from timer callback
     ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, on ? 255 : 0));
     ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
 }
 
-void status_led_start_pulse(void) {
+void status_led_start_pulse() {
     is_pulsing = true;
     pulse_brightness = 50;  // Start at minimum brightness (not completely off)
     pulse_direction = 1;    // Start increasing
@@ -224,7 +222,7 @@ void status_led_start_pulse(void) {
     }
 }
 
-void status_led_start_blink(void) {
+void status_led_start_blink() {
     is_pulsing = false;
     led_blink_state = false;
     if (led_timer) {
@@ -233,14 +231,14 @@ void status_led_start_blink(void) {
     }
 }
 
-void status_led_stop_effects(void) {
+void status_led_stop_effects() {
     if (led_timer) {
         xTimerStop(led_timer, 0);
     }
 }
 
 // Button functions
-void button_init(void) {
+void button_init() {
     ESP_LOGI(TAG, "Initializing button on GPIO %d", BUTTON_PIN);
 
     gpio_config_t io_conf = {};
@@ -267,15 +265,15 @@ void button_init(void) {
         ESP_LOGI(TAG, "GPIO ISR service installed successfully");
     }
 
-    ret = gpio_isr_handler_add((gpio_num_t)BUTTON_PIN, button_isr_handler, NULL);
+    ret = gpio_isr_handler_add(static_cast<gpio_num_t>(BUTTON_PIN), button_isr_handler, nullptr);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add ISR handler for GPIO %d: %s", BUTTON_PIN, esp_err_to_name(ret));
         return;
     }
 
     // Create timer for button hold detection
-    button_timer = xTimerCreate("button_timer", pdMS_TO_TICKS(BUTTON_HOLD_TIME_MS), pdFALSE, NULL, button_hold_callback);
-    if (button_timer == NULL) {
+    button_timer = xTimerCreate("button_timer", pdMS_TO_TICKS(BUTTON_HOLD_TIME_MS), pdFALSE, nullptr, button_hold_callback);
+    if (button_timer == nullptr) {
         ESP_LOGE(TAG, "Failed to create button timer");
         return;
     }
@@ -313,7 +311,7 @@ static void led_pulse_callback(TimerHandle_t xTimer) {
 
 static void button_isr_handler(void* arg) {
     // Don't log from ISR - can cause crashes
-    int gpio_level = gpio_get_level((gpio_num_t)BUTTON_PIN);
+    int gpio_level = gpio_get_level(static_cast<gpio_num_t>(BUTTON_PIN));
     if (gpio_level == 1 && !button_pressed) {
         // Rising edge - button pressed
         button_pressed = true;
@@ -326,7 +324,7 @@ static void button_isr_handler(void* arg) {
 }
 
 static void mode_change_task(void* pvParameters) {
-    int action = (int)pvParameters;
+    int action = reinterpret_cast<int>(pvParameters);
 
     if (action == 1) {
         ESP_LOGI(TAG, "Starting AP mode from task");
@@ -353,20 +351,20 @@ static void mode_change_task(void* pvParameters) {
     }
 
     // Delete this task
-    mode_change_task_handle = NULL;
-    vTaskDelete(NULL);
+    mode_change_task_handle = nullptr;
+    vTaskDelete(nullptr);
 }
 
 static void button_hold_callback(TimerHandle_t xTimer) {
     // Minimal timer callback - just create task, no other operations
-    if (button_pressed && mode_change_task_handle == NULL) {
-        if (gpio_get_level((gpio_num_t)BUTTON_PIN) == 1) {
+    if (button_pressed && mode_change_task_handle == nullptr) {
+        if (gpio_get_level(static_cast<gpio_num_t>(BUTTON_PIN)) == 1) {
             // Button still held - start mode change task
             int action = (current_state != WIFI_STATE_AP_MODE) ? 1 : 0;
-            xTaskCreate(mode_change_task, "mode_change", 4096, (void*)action, 5, &mode_change_task_handle);
+            xTaskCreate(mode_change_task, "mode_change", 4096, reinterpret_cast<void *>(action), 5, &mode_change_task_handle);
         } else {
             // Button released - start restore task
-            xTaskCreate(mode_change_task, "restore", 4096, (void*)2, 5, &mode_change_task_handle);
+            xTaskCreate(mode_change_task, "restore", 4096, reinterpret_cast<void *>(2), 5, &mode_change_task_handle);
         }
     }
     button_pressed = false;
@@ -374,7 +372,8 @@ static void button_hold_callback(TimerHandle_t xTimer) {
 
 static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
     if (event_base == WIFI_EVENT) {
-        switch (event_id) {
+        // ReSharper disable once CppDefaultCaseNotHandledInSwitchStatement
+        switch (event_id) { // NOLINT(*-multiway-paths-covered)
             case WIFI_EVENT_STA_CONNECTED:
                 ESP_LOGI(TAG, "Connected to WiFi");
                 current_state = WIFI_STATE_CONNECTED;
@@ -389,13 +388,13 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t e
                 break;
 
             case WIFI_EVENT_AP_STACONNECTED: {
-                wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+                wifi_event_ap_staconnected_t* event = static_cast<wifi_event_ap_staconnected_t *>(event_data); // NOLINT(*-use-auto)
                 ESP_LOGI(TAG, "Station connected: " MACSTR, MAC2STR(event->mac));
                 break;
             }
 
             case WIFI_EVENT_AP_STADISCONNECTED: {
-                wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+                wifi_event_ap_stadisconnected_t* event = static_cast<wifi_event_ap_stadisconnected_t *>(event_data); // NOLINT(*-use-auto)
                 ESP_LOGI(TAG, "Station disconnected: " MACSTR, MAC2STR(event->mac));
                 break;
             }

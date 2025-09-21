@@ -2,7 +2,6 @@
 #define CAPTIVE_PORTAL_V2_H
 
 #include "esp_http_server.h"
-#include <stdbool.h>
 
 // Captive portal configuration
 typedef struct {
@@ -17,12 +16,12 @@ typedef void (*credentials_saved_callback_t)(const char* ssid, const char* passw
 
 // Function declarations
 bool captive_portal_init(const captive_portal_config_t* config);
-void captive_portal_deinit(void);
+void captive_portal_deinit();
 
-bool captive_portal_start(void);
-void captive_portal_stop(void);
+bool captive_portal_start();
+void captive_portal_stop();
 
-bool captive_portal_is_running(void);
+bool captive_portal_is_running();
 
 // Set callback for when credentials are saved
 void captive_portal_set_credentials_callback(credentials_saved_callback_t callback);

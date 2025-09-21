@@ -83,6 +83,7 @@ bool wifi_storage_save_credentials(const char* ssid, const char* password) {
     return true;
 }
 
+// ReSharper disable once CppDFAConstantFunctionResult
 bool wifi_storage_clear_credentials() {
     nvs_handle_t nvs_handle;
     esp_err_t err = nvs_open(STORAGE_NAMESPACE, NVS_READWRITE, &nvs_handle);

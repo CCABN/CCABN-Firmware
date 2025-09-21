@@ -112,7 +112,7 @@ bool status_led_init(const status_led_config_t* config) {
     return true;
 }
 
-void status_led_deinit(void) {
+void status_led_deinit() {
     if (!is_initialized) {
         return;
     }
@@ -179,11 +179,11 @@ void status_led_set_pattern(led_pattern_t pattern) {
     }
 }
 
-led_pattern_t status_led_get_current_pattern(void) {
+led_pattern_t status_led_get_current_pattern() {
     return current_pattern;
 }
 
-void status_led_button_pressed(void) {
+void status_led_button_pressed() {
     if (!is_initialized) {
         return;
     }
@@ -199,7 +199,7 @@ void status_led_button_pressed(void) {
     }
 }
 
-void status_led_button_released(void) {
+void status_led_button_released() {
     if (!is_initialized) {
         return;
     }
@@ -216,7 +216,7 @@ void status_led_button_released(void) {
     }
 }
 
-void status_led_state_changed(void) {
+void status_led_state_changed() {
     if (!is_initialized) {
         return;
     }
@@ -229,7 +229,7 @@ void status_led_state_changed(void) {
     }
 }
 
-bool status_led_is_initialized(void) {
+bool status_led_is_initialized() {
     return is_initialized;
 }
 

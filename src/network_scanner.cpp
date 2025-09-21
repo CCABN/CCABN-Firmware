@@ -4,7 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "cJSON.h"
-#include <string.h>
+#include <cstring>
 
 static const char *TAG = "NetworkScanner";
 
@@ -20,9 +20,9 @@ static bool scan_in_progress = false;
 
 // Forward declarations
 static void continuous_scan_task(void* parameter);
-static bool perform_scan(void);
+static bool perform_scan();
 
-void network_scanner_init(void) {
+void network_scanner_init() {
     ESP_LOGI(TAG, "Initializing network scanner");
 
     scanner_config.continuous_scan = false;
@@ -37,7 +37,7 @@ void network_scanner_init(void) {
     ESP_LOGI(TAG, "Network scanner initialized");
 }
 
-void network_scanner_deinit(void) {
+void network_scanner_deinit() {
     ESP_LOGI(TAG, "Deinitializing network scanner");
 
     network_scanner_stop_continuous();
@@ -81,7 +81,7 @@ bool network_scanner_start_continuous(uint32_t interval_ms) {
     return true;
 }
 
-void network_scanner_stop_continuous(void) {
+void network_scanner_stop_continuous() {
     if (!scanner_config.active) {
         return;
     }
@@ -106,7 +106,7 @@ void network_scanner_stop_continuous(void) {
     ESP_LOGI(TAG, "Continuous scanning stopped");
 }
 
-bool network_scanner_scan_once(void) {
+bool network_scanner_scan_once() {
     if (scan_in_progress) {
         ESP_LOGW(TAG, "Scan already in progress");
         return false;
@@ -116,11 +116,11 @@ bool network_scanner_scan_once(void) {
     return perform_scan();
 }
 
-uint16_t network_scanner_get_result_count(void) {
+uint16_t network_scanner_get_result_count() {
     return result_count;
 }
 
-const network_scan_result_t* network_scanner_get_results(void) {
+const network_scan_result_t* network_scanner_get_results() {
     return scan_results;
 }
 
@@ -164,11 +164,11 @@ bool network_scanner_get_results_json(char* buffer, size_t buffer_size) {
     return true;
 }
 
-bool network_scanner_is_active(void) {
+bool network_scanner_is_active() {
     return scanner_config.active;
 }
 
-bool network_scanner_is_scanning(void) {
+bool network_scanner_is_scanning() {
     return scan_in_progress;
 }
 
@@ -190,7 +190,7 @@ static void continuous_scan_task(void* parameter) {
     vTaskDelete(nullptr);
 }
 
-static bool perform_scan(void) {
+static bool perform_scan() {
     if (scan_in_progress) {
         return false;
     }

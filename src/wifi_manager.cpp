@@ -309,7 +309,7 @@ static void led_pulse_callback(TimerHandle_t xTimer) {
     }
 }
 
-static void button_isr_handler(void* arg) {
+static void IRAM_ATTR button_isr_handler(void* arg) {
     // Don't log from ISR - can cause crashes
     int gpio_level = gpio_get_level(static_cast<gpio_num_t>(BUTTON_PIN));
     if (gpio_level == 1 && !button_pressed) {

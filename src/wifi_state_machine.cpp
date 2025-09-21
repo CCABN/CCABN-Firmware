@@ -95,6 +95,7 @@ bool wifi_state_machine_send_event(wifi_sm_event_t event, void* data) {
              wifi_state_machine_event_name(event),
              wifi_state_machine_state_name(state_machine.current_state));
 
+    // ReSharper disable once CppDFAUnusedValue
     wifi_sm_state_t new_state = state_machine.current_state;
 
     // Handle events based on current state
@@ -128,7 +129,7 @@ bool wifi_state_machine_send_event(wifi_sm_event_t event, void* data) {
 }
 
 // State handler implementations
-wifi_sm_state_t state_disconnected_handler(wifi_sm_event_t event, void* data) {
+wifi_sm_state_t state_disconnected_handler(const wifi_sm_event_t event, void* data) {
     switch (event) {
         case WIFI_SM_EVENT_INIT:
             // Check for saved credentials and try to connect

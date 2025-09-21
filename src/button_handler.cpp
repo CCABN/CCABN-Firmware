@@ -102,7 +102,7 @@ bool button_handler_init(const button_config_t* config) {
     return true;
 }
 
-void button_handler_deinit(void) {
+void button_handler_deinit() {
     if (!is_initialized) {
         return;
     }
@@ -123,11 +123,11 @@ void button_handler_deinit(void) {
     ESP_LOGI(TAG, "Button handler deinitialized");
 }
 
-bool button_handler_is_initialized(void) {
+bool button_handler_is_initialized() {
     return is_initialized;
 }
 
-bool button_handler_is_pressed(void) {
+bool button_handler_is_pressed() {
     if (!is_initialized) {
         return false;
     }
@@ -137,7 +137,7 @@ bool button_handler_is_pressed(void) {
 }
 
 // Private functions
-static void IRAM_ATTR button_isr_handler(void* arg) {
+static void button_isr_handler(void* arg) {
     BaseType_t higher_priority_task_woken = pdFALSE;
     const bool current_pressed = button_handler_is_pressed();
 
@@ -163,14 +163,14 @@ static void IRAM_ATTR button_isr_handler(void* arg) {
         status_led_button_released();
 
         // Send release event to state machine if hold wasn't processed
-        if (!hold_processed) {
-            // Button was released before hold time - no state change
-        } else {
-            // Button was released after hold time - send release event
-            // Note: We can't call the state machine from ISR, so we'll need
-            // a task for this. For now, the state machine will handle this
-            // through the LED system integration.
-        }
+        // if (!hold_processed) {
+        //     // Button was released before hold time - no state change
+        // } else {
+        //     // Button was released after hold time - send release event
+        //     // Note: We can't call the state machine from ISR, so we'll need
+        //     // a task for this. For now, the state machine will handle this
+        //     // through the LED system integration.
+        // }
     }
 
     portYIELD_FROM_ISR(higher_priority_task_woken);

@@ -5,6 +5,7 @@
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/timers.h"
+#include "freertos/task.h"
 
 static const char *TAG = "ButtonHandler";
 
@@ -14,12 +15,14 @@ static bool is_initialized = false;
 static bool button_pressed = false;
 static bool hold_processed = false;
 
-// Timers
+// Timers and tasks
 static TimerHandle_t hold_timer = nullptr;
+static TaskHandle_t event_task_handle = nullptr;
 
 // Forward declarations
 static void IRAM_ATTR button_isr_handler(void* arg);
 static void button_hold_timer_callback(TimerHandle_t timer);
+static void event_handler_task(void* pvParameters);
 
 bool button_handler_init(const button_config_t* config) {
     if (is_initialized) {
@@ -92,6 +95,14 @@ bool button_handler_init(const button_config_t* config) {
         return false;
     }
 
+    // Create event handler task
+    if (xTaskCreate(event_handler_task, "btn_events", 4096, nullptr, 5, &event_task_handle) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create event handler task");
+        xTimerDelete(hold_timer, 0);
+        gpio_isr_handler_remove(static_cast<gpio_num_t>(button_config.gpio_pin));
+        return false;
+    }
+
     // Initialize state
     button_pressed = false;
     hold_processed = false;
@@ -117,6 +128,12 @@ void button_handler_deinit() {
         xTimerStop(hold_timer, 0);
         xTimerDelete(hold_timer, 0);
         hold_timer = nullptr;
+    }
+
+    // Delete event task
+    if (event_task_handle) {
+        vTaskDelete(event_task_handle);
+        event_task_handle = nullptr;
     }
 
     is_initialized = false;
@@ -193,14 +210,37 @@ static void button_hold_timer_callback(TimerHandle_t timer) {
     // Notify LED of state change
     status_led_state_changed();
 
-    // Get current state and send appropriate event
+    // Get current state and determine event
     const wifi_sm_state_t current_state = wifi_state_machine_get_state();
+    uint32_t event_notification;
 
     if (current_state == WIFI_SM_AP_MODE) {
         // Exit AP mode
-        wifi_state_machine_send_event(WIFI_SM_EVENT_BUTTON_RELEASE, nullptr);
+        event_notification = WIFI_SM_EVENT_BUTTON_RELEASE;
     } else {
         // Enter AP mode
-        wifi_state_machine_send_event(WIFI_SM_EVENT_BUTTON_HOLD, nullptr);
+        event_notification = WIFI_SM_EVENT_BUTTON_HOLD;
+    }
+
+    // Send notification to event handler task (safe from timer context)
+    BaseType_t higher_priority_task_woken = pdFALSE;
+    if (event_task_handle != nullptr) {
+        xTaskNotifyFromISR(event_task_handle, event_notification, eSetValueWithOverwrite, &higher_priority_task_woken);
+        portYIELD_FROM_ISR(higher_priority_task_woken);
+    }
+}
+
+static void event_handler_task(void* pvParameters) {
+    uint32_t event_notification;
+
+    ESP_LOGI(TAG, "Event handler task started");
+
+    while (true) {
+        // Wait for notification from timer callback
+        if (xTaskNotifyWait(0, UINT32_MAX, &event_notification, portMAX_DELAY) == pdTRUE) {
+            // Send event to state machine in proper task context
+            ESP_LOGI(TAG, "Processing state machine event: %lu", event_notification);
+            wifi_state_machine_send_event(static_cast<wifi_sm_event_t>(event_notification), nullptr);
+        }
     }
 }

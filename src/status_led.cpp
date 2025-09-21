@@ -7,7 +7,7 @@
 static const char *TAG = "StatusLED";
 
 // Configuration
-static status_led_config_t led_config = {0};
+static status_led_config_t led_config = {};
 static bool is_initialized = false;
 
 // State management
@@ -17,7 +17,7 @@ static bool button_override_active = false;
 static bool ignore_button_hold = false;
 
 // Animation state
-static TimerHandle_t led_timer = NULL;
+static TimerHandle_t led_timer = nullptr;
 static uint8_t pulse_brightness = 50;    // Start at minimum for pulse
 static int8_t pulse_direction = 1;       // 1 = increasing, -1 = decreasing
 static bool blink_state = false;         // true = on, false = off
@@ -25,7 +25,7 @@ static bool blink_state = false;         // true = on, false = off
 // Forward declarations
 static void led_timer_callback(TimerHandle_t timer);
 static void set_led_brightness(uint8_t brightness);
-static void update_led_output(void);
+//static void update_led_output(void); // For later if needed
 
 bool status_led_init(const status_led_config_t* config) {
     if (is_initialized) {
@@ -52,9 +52,10 @@ bool status_led_init(const status_led_config_t* config) {
     ledc_timer_config_t timer_config = {
         .speed_mode = LEDC_LOW_SPEED_MODE,
         .duty_resolution = LEDC_TIMER_8_BIT,
-        .timer_num = (ledc_timer_t)led_config.ledc_timer,
+        .timer_num = static_cast<ledc_timer_t>(led_config.ledc_timer),
         .freq_hz = led_config.pwm_frequency,
-        .clk_cfg = LEDC_AUTO_CLK
+        .clk_cfg = LEDC_AUTO_CLK,
+        .deconfigure = false
     };
 
     esp_err_t err = ledc_timer_config(&timer_config);
@@ -67,11 +68,13 @@ bool status_led_init(const status_led_config_t* config) {
     ledc_channel_config_t channel_config = {
         .gpio_num = led_config.gpio_pin,
         .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = (ledc_channel_t)led_config.ledc_channel,
+        .channel = static_cast<ledc_channel_t>(led_config.ledc_channel),
         .intr_type = LEDC_INTR_DISABLE,
-        .timer_sel = (ledc_timer_t)led_config.ledc_timer,
+        .timer_sel = static_cast<ledc_timer_t>(led_config.ledc_timer),
         .duty = 0,  // Start with LED off
-        .hpoint = 0
+        .hpoint = 0,
+        .sleep_mode = LEDC_SLEEP_MODE_NO_ALIVE_NO_PD,
+        .flags = {0}
     };
 
     err = ledc_channel_config(&channel_config);
@@ -85,7 +88,7 @@ bool status_led_init(const status_led_config_t* config) {
         "led_timer",
         pdMS_TO_TICKS(50),  // Default 50ms period
         pdTRUE,             // Auto-reload
-        NULL,
+        nullptr,
         led_timer_callback
     );
 
@@ -120,7 +123,7 @@ void status_led_deinit(void) {
     if (led_timer) {
         xTimerStop(led_timer, 0);
         xTimerDelete(led_timer, 0);
-        led_timer = NULL;
+        led_timer = nullptr;
     }
 
     // Turn off LED
@@ -269,12 +272,12 @@ static void set_led_brightness(uint8_t brightness) {
         return;
     }
 
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)led_config.ledc_channel, brightness);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, (ledc_channel_t)led_config.ledc_channel);
+    ledc_set_duty(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(led_config.ledc_channel), brightness);
+    ledc_update_duty(LEDC_LOW_SPEED_MODE, static_cast<ledc_channel_t>(led_config.ledc_channel));
 }
 
-static void update_led_output(void) {
-    // This function is reserved for future use if we need to add
-    // additional processing before setting LED brightness
-    // Currently, set_led_brightness handles direct output
-}
+// static void update_led_output(void) {
+//     // This function is reserved for future use if we need to add
+//     // additional processing before setting LED brightness
+//     // Currently, set_led_brightness handles direct output
+// }

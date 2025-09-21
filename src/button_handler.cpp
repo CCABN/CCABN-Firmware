@@ -9,13 +9,13 @@
 static const char *TAG = "ButtonHandler";
 
 // Configuration and state
-static button_config_t button_config = {0};
+static button_config_t button_config = {};
 static bool is_initialized = false;
 static bool button_pressed = false;
 static bool hold_processed = false;
 
 // Timers
-static TimerHandle_t hold_timer = NULL;
+static TimerHandle_t hold_timer = nullptr;
 
 // Forward declarations
 static void IRAM_ATTR button_isr_handler(void* arg);
@@ -44,7 +44,7 @@ bool button_handler_init(const button_config_t* config) {
     }
 
     // Configure GPIO
-    gpio_config_t io_conf = {0};
+    gpio_config_t io_conf = {};
     io_conf.intr_type = GPIO_INTR_ANYEDGE;
     io_conf.mode = GPIO_MODE_INPUT;
     io_conf.pin_bit_mask = (1ULL << button_config.gpio_pin);
@@ -132,7 +132,7 @@ bool button_handler_is_pressed(void) {
         return false;
     }
 
-    int level = gpio_get_level((gpio_num_t)button_config.gpio_pin);
+    const int level = gpio_get_level((gpio_num_t)button_config.gpio_pin);
     return button_config.active_high ? (level == 1) : (level == 0);
 }
 

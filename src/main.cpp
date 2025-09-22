@@ -7,13 +7,14 @@ static unsigned long lastAppLog = 0;
 static const unsigned long APP_LOG_INTERVAL = 2000; // 2 seconds
 
 void onWiFiConnectionChange(bool connected) {
-    if (connected) {
-        Serial.println("WiFi connected - Starting main application");
+    if (connected && !appRunning) {
+        Serial.println("✓ WiFi connected - Starting main application");
         appRunning = true;
-    } else {
-        Serial.println("WiFi disconnected - Stopping main application");
+    } else if (!connected && appRunning) {
+        Serial.println("✗ WiFi disconnected - Stopping main application");
         appRunning = false;
     }
+    // Ignore redundant state changes
 }
 
 void runMainApplication() {

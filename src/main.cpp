@@ -1,68 +1,151 @@
 #include <Arduino.h>
-#include "wifi_manager.h"
+#include <WiFiManager.h>
+#include <Button2.h>
+#include <WiFi.h>
 
-CustomWiFiManager wifiManager;
-static bool appRunning = false;
-static unsigned long lastAppLog = 0;
-static const unsigned long APP_LOG_INTERVAL = 2000; // 2 seconds
+// Pin definitions
+#define BUTTON_PIN D1  // Physical D1 pin (GPIO2)
 
-void onWiFiConnectionChange(bool connected) {
-    if (connected && !appRunning) {
-        Serial.println("✓ WiFi connected - Starting main application");
-        appRunning = true;
-    } else if (!connected && appRunning) {
-        Serial.println("✗ WiFi disconnected - Stopping main application");
-        appRunning = false;
-    }
-    // Ignore redundant state changes
+// Global variables
+Button2 button;
+String apName;
+
+// Generate AP name with MAC address
+String generateAPName() {
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    return "CCABN_TRACKER_" + mac.substring(6); // Last 6 chars
 }
 
-void runMainApplication() {
-    unsigned long currentTime = millis();
+// Button callbacks for debugging
+void onButtonPressed(Button2& btn) {
+    Serial.println("Button pressed!");
+}
 
-    if (currentTime - lastAppLog >= APP_LOG_INTERVAL) {
-        Serial.println("APP IS RUNNING - WiFi connected, all systems operational");
-        lastAppLog = currentTime;
+void onButtonReleased(Button2& btn) {
+    Serial.println("Button released!");
+}
+
+// Button callback for 3-second hold
+void onButtonLongPress(Button2& btn) {
+    Serial.println("=== BUTTON HELD FOR 3 SECONDS ===");
+    Serial.println("Starting AP configuration mode...");
+
+    WiFiManager wm;
+
+    // Enable debug output
+    wm.setDebugOutput(true);
+
+    // Improve network scanning for mobile hotspots
+    wm.setMinimumSignalQuality(0);  // Show all networks regardless of signal strength
+    wm.setRemoveDuplicateAPs(false); // Don't remove duplicate APs (some hotspots appear multiple times)
+    wm.setScanDispPerc(true);       // Show signal strength as percentage
+
+    Serial.println("AP Name: " + apName);
+    Serial.println("Configuration portal will run indefinitely until configured");
+
+    // Start config portal (blocks until configured)
+    if (!wm.startConfigPortal(apName.c_str())) {
+        Serial.println("Failed to start config portal");
+    } else {
+        Serial.println("Configuration completed successfully!");
     }
+
+    Serial.println("=== RETURNING TO MAIN LOOP ===");
 }
 
 void setup() {
     Serial.begin(115200);
 
-    // Wait for serial monitor to connect and stabilize
+    // Wait for serial monitor
     while (!Serial) {
         delay(10);
     }
+    delay(2000);
 
-    // Additional delay to ensure serial monitor is fully ready
-    delay(3000);
-
-    // Send a few test messages to ensure connection is stable
     Serial.println();
     Serial.println("====================================");
-    Serial.println("Serial monitor connected!");
+    Serial.println("    CCABN Firmware Starting");
     Serial.println("====================================");
-    Serial.println("Starting CCABN Firmware...");
-    Serial.println("Initializing WiFi Manager...");
 
-    // Set up WiFi connection callback
-    wifiManager.setConnectionCallback(onWiFiConnectionChange);
+    // Generate AP name first (needs WiFi mode set)
+    WiFi.mode(WIFI_STA);
+    apName = generateAPName();
+    Serial.println("Generated AP name: " + apName);
 
-    // Initialize WiFi manager
-    wifiManager.begin();
+    // Setup button
+    button.begin(BUTTON_PIN);
+    button.setLongClickTime(3000); // 3 seconds
+    button.setLongClickHandler(onButtonLongPress);
+    button.setPressedHandler(onButtonPressed);
+    button.setReleasedHandler(onButtonReleased);
+    Serial.println("Button configured on pin D1 (GPIO2) with debug callbacks");
 
-    Serial.println("Setup complete, entering main loop...");
+    // Start AP auto mode
+    Serial.println("Starting WiFiManager autoConnect...");
+
+    WiFiManager wm;
+
+    // Enable debug output for library
+    wm.setDebugOutput(true);
+
+    // Improve network scanning for mobile hotspots
+    wm.setMinimumSignalQuality(0);  // Show all networks regardless of signal strength
+    wm.setRemoveDuplicateAPs(false); // Don't remove duplicate APs (some hotspots appear multiple times)
+    wm.setScanDispPerc(true);       // Show signal strength as percentage
+
+    // This line not reached until AP mode exits (if it starts)
+    bool connected = wm.autoConnect(apName.c_str());
+
+    if (connected) {
+        Serial.println("=== WIFI CONNECTED SUCCESSFULLY ===");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+        Serial.print("SSID: ");
+        Serial.println(WiFi.SSID());
+    } else {
+        Serial.println("=== WIFI CONNECTION FAILED ===");
+        Serial.println("Continuing to main loop...");
+    }
+
+    Serial.println("=== SETUP COMPLETE - ENTERING MAIN LOOP ===");
 }
 
 void loop() {
-    // Always run WiFi manager loop
-    wifiManager.loop();
+    // Handle button events
+    button.loop();
 
-    // Only run main application when WiFi is connected
-    if (appRunning && wifiManager.isConnected()) {
-        runMainApplication();
+    // WiFi status checking (built into library)
+    static unsigned long lastStatusCheck = 0;
+    static bool lastConnectedState = false;
+
+    if (millis() - lastStatusCheck > 5000) { // Check every 5 seconds
+        bool currentlyConnected = (WiFi.status() == WL_CONNECTED);
+
+        if (currentlyConnected != lastConnectedState) {
+            if (currentlyConnected) {
+                Serial.println("✓ WiFi reconnected!");
+                Serial.print("IP: ");
+                Serial.println(WiFi.localIP());
+            } else {
+                Serial.println("✗ WiFi disconnected!");
+            }
+            lastConnectedState = currentlyConnected;
+        }
+
+        // Periodic status update
+        Serial.print("WiFi Status: ");
+        if (currentlyConnected) {
+            Serial.println("Connected to " + WiFi.SSID());
+        } else {
+            Serial.println("Disconnected");
+        }
+
+        lastStatusCheck = millis();
     }
 
-    // Small delay for stability
-    delay(10);
+    // Run application loop here
+    // (Main application code would go here when WiFi is connected)
+
+    delay(100); // Small delay for stability
 }

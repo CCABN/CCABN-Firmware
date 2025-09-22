@@ -37,9 +37,7 @@ void CustomWiFiManager::begin() {
         Serial.println("WiFi connected successfully via autoConnect!");
         _isConnected = true;
         _credentialsExist = true;
-        if (_connectionCallback) {
-            _connectionCallback(true);
-        }
+        // Don't call callback here - WiFi events will handle it
     } else {
         Serial.println("AutoConnect failed - will retry in loop");
         _isConnected = false;

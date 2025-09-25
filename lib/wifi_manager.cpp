@@ -52,9 +52,17 @@ namespace CCABN {
         // Save the wifi credentials to spiffs
     }
 
+    // Start the AP with the capture portal. this will be the hardest part.
     bool WiFiManager::startAP() {
-        // Start the AP with the capture portal. this will be the hardest part.
-        // Set the credentials
+
+        /// The capture portal should just use a singular html file. you can look at the one in /data for reference but it needs heavy modification.
+        /// scanning for networks should run entirely in the background so that requests can be processed at the same time it's scanning
+        /// have a notifier to know whether or not network scanning is in effect
+        /// scans should run automatically every 5 seconds. if a scan command is sent and its not already scanning, a new scan should start.
+        /// the user should know that the credentials have been saved correctly (eg. a 10 second countdown on a seconds page that says "credentials saved. exiting in X seconds.)
+        /// more specifics are probably necessary but i cant think about them now. ask me later.
+
+        /// make sure to set the credentials by the end of the function. use saveCredentials and set the actual credentials variable.
     }
 
     bool WiFiManager::connectToWiFi(WiFiCredentials credentials) {

@@ -1,7 +1,6 @@
 #pragma once
 #include <Arduino.h>
 #include <string>
-#include <vector>
 #include <set>
 
 // Forward declarations
@@ -10,7 +9,6 @@ class DNSServer;
 class Preferences;
 
 namespace CCABN {
-
     enum WiFiStatus {
         WIFI_CONNECTED,
         WIFI_CONNECTING,
@@ -24,15 +22,14 @@ namespace CCABN {
         String ssid;
         String password;
         bool exists;
-        bool isPassword;
+        bool hasPassword;
 
-        void print();
+        void print() const;
     };
 
     class WiFiManager {
     private:
         WiFiCredentials credentials;
-        std::vector<std::string> errors;
         WebServer* server;
         DNSServer* dnsServer;
         Preferences* preferences;
@@ -53,35 +50,31 @@ namespace CCABN {
 
     public:
         std::string apName = "Default AP Name";
-        bool autoPrintErrors = false;
-        WiFiStatus status = WiFiStatus::WIFI_DISCONNECTED;
+        WiFiStatus status = WIFI_DISCONNECTED;
 
         WiFiManager();
         ~WiFiManager();
         WiFiCredentials getCredentials();
-        void printErrors();
-        std::vector<std::string> getErrors();
-        void printCredentials();
-        void saveCredentials(WiFiCredentials credentials);
+        void printCredentials() const;
+        void saveCredentials(const WiFiCredentials& credentials);
         bool startAP();
         bool connectToWiFi(const WiFiCredentials &credentials);
         bool connectToWiFi();
         void stopAP();
-        bool isConnected();
+        bool isConnected() const;
         void loop();
         void clearCredentials();
 
     private:
-        void handleRoot();
+        void handleRoot() const;
         void handleConnect();
-        void handleNotFound();
+        void handleNotFound() const;
         void handleNetworks();
-        void handleScanStatus();
+        void handleScanStatus() const;
         void handleExit();
-        void handleStaticFile();
-        String scanNetworks();
-        String getHTMLTemplate();
-        void addError(const String& error);
+        void handleStaticFile() const;
+        static String scanNetworks();
+        static String getHTMLTemplate();
         void startBackgroundScan();
         void checkScanStatus();
         String buildNetworksHtml();

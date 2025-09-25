@@ -13,6 +13,7 @@ void setup() {
 
     wifiManager.apName = "My Device Setup";
     wifiManager.autoPrintErrors = true;
+    wifiManager.clearCredentials();
     WiFiCredentials credentials = wifiManager.getCredentials();
 
     while (wifiManager.status != WiFiStatus::WIFI_CONNECTED) {

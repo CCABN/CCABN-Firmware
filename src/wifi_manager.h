@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <string>
 #include <vector>
+#include <set>
 
 // Forward declarations
 class WebServer;
@@ -38,13 +39,17 @@ namespace CCABN {
         unsigned long connectionTimeout = 15000;
         bool apMode = false;
 
-        // Async WiFi scanning
+        // Network caching system
+        std::set<String> cachedNetworks;
         bool scanInProgress = false;
         bool scanComplete = false;
+        bool firstScanPending = false;
+        unsigned long firstScanScheduledTime = 0;
         unsigned long lastScanTime = 0;
         unsigned long scanInterval = 15000; // Scan every 15 seconds
         String cachedNetworksHtml = "";
         int lastNetworkCount = 0;
+
 
     public:
         std::string apName = "Default AP Name";
@@ -71,11 +76,15 @@ namespace CCABN {
         void handleConnect();
         void handleNotFound();
         void handleNetworks();
+        void handleScanStatus();
+        void handleExit();
+        void handleStaticFile();
         String scanNetworks();
         String getHTMLTemplate();
         void addError(const String& error);
         void startBackgroundScan();
         void checkScanStatus();
         String buildNetworksHtml();
+        void clearNetworkCache();
     };
 }

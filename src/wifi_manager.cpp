@@ -133,9 +133,13 @@ namespace CCABN {
         server->on("/", [this]() { handleRoot(); });
         server->on("/connect", HTTP_POST, [this]() { handleConnect(); });
         server->on("/networks", [this]() { handleNetworks(); });
+        server->on("/scan-status", [this]() { handleScanStatus(); });
+        server->on("/exit", HTTP_POST, [this]() { handleExit(); });
+        server->on("/portalicon.png", [this]() { handleStaticFile(); });
 
         // Handle common captive portal detection requests
         server->on("/generate_204", [this]() { handleRoot(); }); // Android captive portal detection
+        server->on("/gen_204", [this]() { handleRoot(); }); // Android captive portal detection (alternative)
         server->on("/fwlink", [this]() { handleRoot(); }); // Windows captive portal detection
         server->on("/hotspot-detect.html", [this]() { handleRoot(); }); // iOS captive portal detection
         server->on("/library/test/success.html", [this]() { handleRoot(); }); // iOS alternative
@@ -153,9 +157,11 @@ namespace CCABN {
         server->begin();
         Serial.println("Captive portal web server started");
 
-        // Delay first scan to let AP mode stabilize
-        Serial.println("[WiFiManager] Delaying first scan by 2 seconds for AP stabilization");
-        lastScanTime = millis() + 2000; // Start first scan in 2 seconds
+        // Schedule first scan to happen in 2 seconds for AP stabilization
+        Serial.println("[WiFiManager] Scheduling first scan in 2 seconds for AP stabilization");
+        firstScanPending = true;
+        firstScanScheduledTime = millis() + 2000; // First scan in exactly 2 seconds
+        lastScanTime = 0; // Reset for proper interval tracking
 
         return true;
     }
@@ -240,6 +246,8 @@ namespace CCABN {
             WiFi.softAPdisconnect(true);
             apMode = false;
             status = WiFiStatus::WIFI_DISCONNECTED;
+            // Clear network cache when exiting AP mode
+            clearNetworkCache();
             Serial.println("Access Point stopped");
         }
     }
@@ -266,7 +274,7 @@ namespace CCABN {
         String password = server->arg("password");
 
         if (ssid.length() == 0) {
-            server->send(400, "text/html", "<h1>Error</h1><p>SSID is required</p><a href='/'>Back</a>");
+            server->send(400, "application/json", "{\"success\":false,\"error\":\"SSID is required\"}");
             return;
         }
 
@@ -279,20 +287,9 @@ namespace CCABN {
 
         saveCredentials(newCreds);
 
-        // Send success page
-        String html = "<!DOCTYPE html><html><head><title>WiFi Setup</title></head><body>";
-        html += "<h1>Credentials Saved</h1>";
-        html += "<p>WiFi credentials have been saved successfully.</p>";
-        html += "<p>SSID: " + ssid + "</p>";
-        html += "<p>The device will now attempt to connect to the network.</p>";
-        html += "<p>You can close this page.</p>";
-        html += "</body></html>";
-
-        server->send(200, "text/html", html);
-
-        // Stop AP mode and attempt connection
-        delay(2000); // Give time for the response to be sent
-        stopAP();
+        // Send JSON success response
+        String jsonResponse = "{\"success\":true,\"ssid\":\"" + ssid + "\",\"password\":\"" + password + "\"}";
+        server->send(200, "application/json", jsonResponse);
     }
 
     void WiFiManager::handleNotFound() {
@@ -365,7 +362,7 @@ namespace CCABN {
         }
 
         // Fallback to basic HTML if file not found
-        String html = "<!DOCTYPE html><html><head><title>WiFi Setup</title>";
+        String html = "<!DOCTYPE html><html><head><title>Fallback Page</title>";
         html += "<style>";
         html += "body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }";
         html += ".container { max-width: 400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }";
@@ -470,13 +467,15 @@ namespace CCABN {
         if (!scanInProgress && apMode) {
             Serial.println("[WiFiManager] Starting background WiFi scan");
 
+            // Set scanning state immediately
+            scanInProgress = true;
+
             // Use synchronous scanning since async fails in AP mode
             // Keep it fast with shorter timeout to minimize web server blocking
             int syncResult = WiFi.scanNetworks(false, false, false, 200); // 200ms per channel max
 
             if (syncResult >= 0) {
                 Serial.println("[WiFiManager] Background scan completed, found " + String(syncResult) + " networks");
-                scanInProgress = false;
                 scanComplete = true;
                 lastNetworkCount = syncResult;
 
@@ -488,7 +487,6 @@ namespace CCABN {
                 scanInterval = 15000; // Scan every 15 seconds when working
             } else if (syncResult == WIFI_SCAN_FAILED) {
                 Serial.println("[WiFiManager] Background scan failed - will retry less frequently");
-                scanInProgress = false;
                 scanComplete = false;
                 lastScanTime = millis();
 
@@ -497,16 +495,28 @@ namespace CCABN {
                 Serial.println("[WiFiManager] Next scan retry in " + String(scanInterval/1000) + " seconds");
             } else {
                 Serial.println("[WiFiManager] Unexpected scan result: " + String(syncResult));
-                scanInProgress = false;
                 scanComplete = false;
                 lastScanTime = millis();
             }
+
+            // Always clear scan progress flag after completion
+            scanInProgress = false;
         }
     }
 
     void WiFiManager::checkScanStatus() {
-        // Since we're using synchronous scanning, just check if it's time for a new scan
-        if (!scanInProgress && millis() > lastScanTime && (millis() - lastScanTime) > scanInterval) {
+        // Check for first scheduled scan
+        if (firstScanPending && !scanInProgress && millis() >= firstScanScheduledTime) {
+            Serial.println("[WiFiManager] Triggering first scheduled WiFi scan");
+            firstScanPending = false;
+            startBackgroundScan();
+            return;
+        }
+
+        // Check for regular interval-based scans
+        if (!scanInProgress && !firstScanPending && lastScanTime > 0 &&
+            millis() > lastScanTime && (millis() - lastScanTime) > scanInterval) {
+            Serial.println("[WiFiManager] Triggering interval-based WiFi scan");
             startBackgroundScan();
         }
     }
@@ -515,27 +525,23 @@ namespace CCABN {
         String networksHtml = "";
         int numNetworks = WiFi.scanComplete();
 
-        if (numNetworks == 0) {
-            networksHtml = "<div class='no-networks'>No networks found</div>";
-        } else if (numNetworks > 0) {
+        // Add new networks to cache
+        if (numNetworks > 0) {
             for (int i = 0; i < numNetworks; i++) {
                 String ssid = WiFi.SSID(i);
-                int32_t rssi = WiFi.RSSI(i);
-                bool isSecured = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
-
-                String signalStrength = "";
-                if (rssi > -50) signalStrength = "Excellent";
-                else if (rssi > -60) signalStrength = "Good";
-                else if (rssi > -70) signalStrength = "Fair";
-                else signalStrength = "Weak";
-
-                networksHtml += "<div class='network' data-ssid='" + ssid + "' data-secured='" + (isSecured ? "true" : "false") + "'>";
-                networksHtml += "<span>" + ssid + "</span>";
-                networksHtml += "<span class='signal-strength'>" + signalStrength;
-                if (isSecured) {
-                    networksHtml += " <span class='lock-icon'>🔒</span>";
+                if (ssid.length() > 0) { // Ignore empty SSIDs
+                    cachedNetworks.insert(ssid);
                 }
-                networksHtml += "</span>";
+            }
+        }
+
+        // Build HTML from cached networks (simplified without signal strength or lock icons)
+        if (cachedNetworks.empty()) {
+            networksHtml = "<div class='no-networks'>No networks found</div>";
+        } else {
+            for (const String& ssid : cachedNetworks) {
+                networksHtml += "<div class='network' data-ssid='" + ssid + "'>";
+                networksHtml += "<span>" + ssid + "</span>";
                 networksHtml += "</div>";
             }
         }
@@ -545,6 +551,12 @@ namespace CCABN {
 
     void WiFiManager::handleNetworks() {
         // AJAX endpoint to get current network scan results
+        // If called manually (with 'refresh' parameter), trigger a new scan
+        if (server->hasArg("refresh") && !scanInProgress) {
+            Serial.println("[WiFiManager] Manual refresh requested, starting scan");
+            startBackgroundScan();
+        }
+
         String response = "";
 
         if (scanInProgress) {
@@ -552,9 +564,70 @@ namespace CCABN {
         } else if (scanComplete) {
             response = cachedNetworksHtml;
         } else {
-            response = "<div class='no-networks'>Starting network scan...</div>";
+            response = "<div class='no-networks'>Scanning for networks...</div>";
         }
 
         server->send(200, "text/html", response);
     }
+
+    void WiFiManager::handleScanStatus() {
+        // Simple JSON endpoint for current scan status
+        String jsonResponse = "{\"scanning\":" + String(scanInProgress ? "true" : "false") +
+                             ",\"complete\":" + String(scanComplete ? "true" : "false") + "}";
+
+        server->send(200, "application/json", jsonResponse);
+    }
+
+
+    void WiFiManager::handleExit() {
+        // Endpoint to trigger AP mode exit after success countdown
+        server->send(200, "application/json", "{\"success\":true}");
+
+        // Stop AP mode and attempt connection with saved credentials
+        delay(300); // Give time for the response to be sent
+        stopAP();
+    }
+
+    void WiFiManager::clearNetworkCache() {
+        cachedNetworks.clear();
+        cachedNetworksHtml = "";
+        scanComplete = false;
+        Serial.println("[WiFiManager] Network cache cleared");
+    }
+
+    void WiFiManager::handleStaticFile() {
+        String path = server->uri();
+        String contentType = "text/plain";
+
+        // Determine content type based on file extension
+        if (path.endsWith(".png")) {
+            contentType = "image/png";
+        } else if (path.endsWith(".jpg") || path.endsWith(".jpeg")) {
+            contentType = "image/jpeg";
+        } else if (path.endsWith(".gif")) {
+            contentType = "image/gif";
+        } else if (path.endsWith(".ico")) {
+            contentType = "image/x-icon";
+        } else if (path.endsWith(".css")) {
+            contentType = "text/css";
+        } else if (path.endsWith(".js")) {
+            contentType = "application/javascript";
+        }
+
+        // Try to serve the file from SPIFFS
+        if (SPIFFS.exists(path)) {
+            File file = SPIFFS.open(path, "r");
+            if (file) {
+                server->streamFile(file, contentType);
+                file.close();
+                Serial.println("[WiFiManager] Served static file: " + path);
+                return;
+            }
+        }
+
+        // File not found
+        Serial.println("[WiFiManager] Static file not found: " + path);
+        server->send(404, "text/plain", "File not found");
+    }
+
 }

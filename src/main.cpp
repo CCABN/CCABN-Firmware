@@ -1,62 +1,151 @@
-#include "wifi_state_machine.h"
-#include "button_handler.h"
-#include "esp_log.h"
-#include "nvs_flash.h"
-#include "esp_spiffs.h"
-#include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
+#include <Arduino.h>
+#include <WiFiManager.h>
+#include <Button2.h>
+#include <WiFi.h>
 
-static const char *TAG = "CCABN";
+// Pin definitions
+#define BUTTON_PIN D1  // Physical D1 pin (GPIO2)
 
-extern "C" void app_main(void)
-{
-    ESP_LOGI(TAG, "Starting CCABN Tracker ESP32-S3");
+// Global variables
+Button2 button;
+String apName;
 
-    // Initialize NVS
-    esp_err_t ret = nvs_flash_init();
-    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
-        ESP_ERROR_CHECK(nvs_flash_erase());
-        ret = nvs_flash_init();
-    }
-    ESP_ERROR_CHECK(ret);
+// Generate AP name with MAC address
+String generateAPName() {
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    return "CCABN_TRACKER_" + mac.substring(6); // Last 6 chars
+}
 
-    // Initialize SPIFFS filesystem
-    esp_vfs_spiffs_conf_t conf = {
-        .base_path = "/spiffs",
-        .partition_label = nullptr,
-        .max_files = 5,
-        .format_if_mount_failed = false
-    };
-    esp_err_t spiffs_ret = esp_vfs_spiffs_register(&conf);
-    if (spiffs_ret != ESP_OK) {
-        ESP_LOGW(TAG, "SPIFFS not available, using fallback HTML");
+// Button callbacks for debugging
+void onButtonPressed(Button2& btn) {
+    Serial.println("Button pressed!");
+}
+
+void onButtonReleased(Button2& btn) {
+    Serial.println("Button released!");
+}
+
+// Button callback for 3-second hold
+void onButtonLongPress(Button2& btn) {
+    Serial.println("=== BUTTON HELD FOR 3 SECONDS ===");
+    Serial.println("Starting AP configuration mode...");
+
+    WiFiManager wm;
+
+    // Enable debug output
+    wm.setDebugOutput(true);
+
+    // Improve network scanning for mobile hotspots
+    wm.setMinimumSignalQuality(0);  // Show all networks regardless of signal strength
+    wm.setRemoveDuplicateAPs(false); // Don't remove duplicate APs (some hotspots appear multiple times)
+    wm.setScanDispPerc(true);       // Show signal strength as percentage
+
+    Serial.println("AP Name: " + apName);
+    Serial.println("Configuration portal will run indefinitely until configured");
+
+    // Start config portal (blocks until configured)
+    if (!wm.startConfigPortal(apName.c_str())) {
+        Serial.println("Failed to start config portal");
     } else {
-        ESP_LOGI(TAG, "SPIFFS mounted successfully");
+        Serial.println("Configuration completed successfully!");
     }
 
-    // Initialize Wi-Fi state machine
-    wifi_state_machine_init();
+    Serial.println("=== RETURNING TO MAIN LOOP ===");
+}
 
-    // Initialize button handler
-    button_config_t button_config = {
-        .gpio_pin = 2,           // BUTTON_PIN from original code
-        .active_high = true,     // Button is active high
-        .hold_time_ms = 3000,    // 3 seconds for state change
-        .debounce_ms = 50        // 50ms debounce
-    };
+void setup() {
+    Serial.begin(115200);
 
-    if (!button_handler_init(&button_config)) {
-        ESP_LOGE(TAG, "Failed to initialize button handler");
-        return;
+    // Wait for serial monitor
+    while (!Serial) {
+        delay(10);
+    }
+    delay(2000);
+
+    Serial.println();
+    Serial.println("====================================");
+    Serial.println("    CCABN Firmware Starting");
+    Serial.println("====================================");
+
+    // Generate AP name first (needs WiFi mode set)
+    WiFi.mode(WIFI_STA);
+    apName = generateAPName();
+    Serial.println("Generated AP name: " + apName);
+
+    // Setup button
+    button.begin(BUTTON_PIN);
+    button.setLongClickTime(3000); // 3 seconds
+    button.setLongClickHandler(onButtonLongPress);
+    button.setPressedHandler(onButtonPressed);
+    button.setReleasedHandler(onButtonReleased);
+    Serial.println("Button configured on pin D1 (GPIO2) with debug callbacks");
+
+    // Start AP auto mode
+    Serial.println("Starting WiFiManager autoConnect...");
+
+    WiFiManager wm;
+
+    // Enable debug output for library
+    wm.setDebugOutput(true);
+
+    // Improve network scanning for mobile hotspots
+    wm.setMinimumSignalQuality(0);  // Show all networks regardless of signal strength
+    wm.setRemoveDuplicateAPs(false); // Don't remove duplicate APs (some hotspots appear multiple times)
+    wm.setScanDispPerc(true);       // Show signal strength as percentage
+
+    // This line not reached until AP mode exits (if it starts)
+    bool connected = wm.autoConnect(apName.c_str());
+
+    if (connected) {
+        Serial.println("=== WIFI CONNECTED SUCCESSFULLY ===");
+        Serial.print("IP Address: ");
+        Serial.println(WiFi.localIP());
+        Serial.print("SSID: ");
+        Serial.println(WiFi.SSID());
+    } else {
+        Serial.println("=== WIFI CONNECTION FAILED ===");
+        Serial.println("Continuing to main loop...");
     }
 
-    ESP_LOGI(TAG, "CCABN Tracker initialized successfully");
-    ESP_LOGI(TAG, "Hold button for 3 seconds to toggle WiFi setup mode");
+    Serial.println("=== SETUP COMPLETE - ENTERING MAIN LOOP ===");
+}
 
-    // Main loop - just keep the task alive
-    // All functionality is now handled by the state machine and modules
-    // ReSharper disable once CppDFAEndlessLoop
-    while (true) {
-        vTaskDelay(pdMS_TO_TICKS(10000)); // Sleep for 10 seconds
+void loop() {
+    // Handle button events
+    button.loop();
+
+    // WiFi status checking (built into library)
+    static unsigned long lastStatusCheck = 0;
+    static bool lastConnectedState = false;
+
+    if (millis() - lastStatusCheck > 5000) { // Check every 5 seconds
+        bool currentlyConnected = (WiFi.status() == WL_CONNECTED);
+
+        if (currentlyConnected != lastConnectedState) {
+            if (currentlyConnected) {
+                Serial.println("✓ WiFi reconnected!");
+                Serial.print("IP: ");
+                Serial.println(WiFi.localIP());
+            } else {
+                Serial.println("✗ WiFi disconnected!");
+            }
+            lastConnectedState = currentlyConnected;
+        }
+
+        // Periodic status update
+        Serial.print("WiFi Status: ");
+        if (currentlyConnected) {
+            Serial.println("Connected to " + WiFi.SSID());
+        } else {
+            Serial.println("Disconnected");
+        }
+
+        lastStatusCheck = millis();
     }
+
+    // Run application loop here
+    // (Main application code would go here when WiFi is connected)
+
+    delay(100); // Small delay for stability
 }

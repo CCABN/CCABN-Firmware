@@ -1,24 +1,25 @@
 #include "wifi_manager.h"
+
+// ESP32 System includes
+#include <esp_log.h>
 #include <HWCDC.h>
+
+// WiFi and networking includes
 #include <WiFi.h>
 #include <WebServer.h>
 #include <DNSServer.h>
+
+// Storage includes
 #include <Preferences.h>
 #include <SPIFFS.h>
 
 namespace CCABN {
     void WiFiCredentials::print() const {
-        Serial.println("Printing WiFi Credentials:");
-        if (exists) {
-            Serial.println("SSID: " + ssid);
-            if (hasPassword) {
-                Serial.println("Password: " + password);
-            } else {
-                Serial.println("No Password");
-            }
-
-        } else {
-            Serial.println("No Credentials");
+        log_i("[WiFiCredentials] SSID: %s", exists ? ssid.c_str() : "None");
+        if (exists && hasPassword) {
+            log_i("[WiFiCredentials] Password: %s", password.c_str());
+        } else if (exists) {
+            log_i("[WiFiCredentials] No password required");
         }
     }
 
@@ -30,10 +31,14 @@ namespace CCABN {
         credentials.hasPassword = false;
         credentials.ssid = "";
         credentials.password = "";
+        credentialsReceived = false;
+        connectionCallback = nullptr;
 
         // Initialize SPIFFS for web content
         if (!SPIFFS.begin(true)) {
-            Serial.println("[ERROR] Failed to mount SPIFFS");
+            log_e("[WiFiManager] Failed to mount SPIFFS");
+        } else {
+            log_i("[WiFiManager] SPIFFS mounted successfully");
         }
 
         // Load stored credentials
@@ -81,36 +86,39 @@ namespace CCABN {
         credentials.exists = (newCredentials.ssid.length() > 0);
         credentials.hasPassword = (newCredentials.password.length() > 0);
 
-        Serial.println("WiFi credentials saved");
+        log_i("[WiFiManager] WiFi credentials saved: %s", newCredentials.ssid.c_str());
+        credentialsReceived = true;
     }
 
-    // Start the AP with the capture portal. this will be the hardest part.
+    // Start the AP with the captive portal and handle configuration blocking until complete
     bool WiFiManager::startAP() {
         // Stop any existing connections
         WiFi.disconnect();
         stopAP();
 
+        // Reset credentials received flag
+        credentialsReceived = false;
+
         // Set WiFi mode to support both AP and Station operations
-        Serial.println("[WiFiManager] Setting WiFi mode to WIFI_AP_STA for concurrent operations");
+        log_i("[WiFiManager] Setting WiFi mode to WIFI_AP_STA for concurrent operations");
         WiFiClass::mode(WIFI_AP_STA);
         delay(100); // Give time for mode change
 
         // Start Access Point
-        const String apNameStr = String(apName.c_str());
-        const bool apSuccess = WiFi.softAP(apNameStr);
+        const bool apSuccess = WiFi.softAP(apName);
 
-        Serial.println("[WiFiManager] WiFi mode after AP start: " + String(WiFiClass::getMode()));
+        log_i("[WiFiManager] WiFi mode after AP start: %d", WiFiClass::getMode());
 
         if (!apSuccess) {
-            Serial.println("[ERROR] Failed to start Access Point");
+            log_e("[WiFiManager] Failed to start Access Point");
             return false;
         }
 
         apMode = true;
         status = WIFI_AP_MODE;
 
-        Serial.println("Access Point started: " + apNameStr);
-        Serial.println("AP IP address: " + WiFi.softAPIP().toString());
+        log_i("[WiFiManager] Access Point started: %s", apName.c_str());
+        log_i("[WiFiManager] AP IP address: %s", WiFi.softAPIP().toString().c_str());
 
         // Initialize DNS Server for captive portal
         dnsServer = new DNSServer();
@@ -144,26 +152,39 @@ namespace CCABN {
         server->onNotFound([this]() { handleNotFound(); });
 
         server->begin();
-        Serial.println("Captive portal web server started");
+        log_i("[WiFiManager] Captive portal web server started");
 
         // Schedule first scan to happen in 2 seconds for AP stabilization
-        Serial.println("[WiFiManager] Scheduling first scan in 2 seconds for AP stabilization");
+        log_i("[WiFiManager] Scheduling first scan in 2 seconds for AP stabilization");
         firstScanPending = true;
         firstScanScheduledTime = millis() + 2000; // First scan in exactly 2 seconds
         lastScanTime = 0; // Reset for proper interval tracking
 
-        return true;
+        // Block here and handle the captive portal until credentials are received
+        log_i("[WiFiManager] Entering blocking mode - waiting for credentials (no timeout)");
+
+        while (!credentialsReceived) {
+            loop(); // Handle web server and DNS server
+            delay(100); // Small delay to prevent watchdog issues
+        }
+
+        log_i("[WiFiManager] Credentials received successfully");
+
+        // Clean up and stop AP mode
+        stopAP();
+
+        return true; // Always true since we only exit when credentials received
     }
 
     bool WiFiManager::connectToWiFi(const WiFiCredentials &creds) {
         if (creds.ssid.length() == 0) {
-            Serial.println("[ERROR] No SSID provided");
+            log_e("[WiFiManager] No SSID provided for connection");
             status = WIFI_FAILED;
             return false;
         }
 
         status = WIFI_CONNECTING;
-        Serial.println("Connecting to WiFi: " + creds.ssid);
+        log_i("[WiFiManager] Connecting to WiFi: %s", creds.ssid.c_str());
 
         // Disconnect first if already connected
         if (WiFiClass::status() == WL_CONNECTED) {
@@ -182,20 +203,29 @@ namespace CCABN {
         unsigned long startTime = millis();
         while (WiFiClass::status() != WL_CONNECTED && (millis() - startTime) < connectionTimeout) {
             delay(500);
-            Serial.print(".");
+            log_d("[WiFiManager] Connecting...");
         }
 
         if (WiFiClass::status() == WL_CONNECTED) {
             status = WIFI_CONNECTED;
-            Serial.println();
-            Serial.println("WiFi connected!");
-            Serial.println("IP address: " + WiFi.localIP().toString());
+            log_i("[WiFiManager] WiFi connected successfully!");
+            log_i("[WiFiManager] IP address: %s", WiFi.localIP().toString().c_str());
+
+            // Call connection callback if set
+            if (connectionCallback) {
+                connectionCallback(true);
+            }
+
             return true;
         } else {
             status = WIFI_FAILED;
-            Serial.println("[ERROR] Failed to connect to WiFi: " + creds.ssid);
-            Serial.println();
-            Serial.println("WiFi connection failed");
+            log_e("[WiFiManager] Failed to connect to WiFi: %s", creds.ssid.c_str());
+
+            // Call connection callback if set
+            if (connectionCallback) {
+                connectionCallback(false);
+            }
+
             return false;
         }
     }
@@ -204,7 +234,7 @@ namespace CCABN {
         if (credentials.exists) {
             return connectToWiFi(credentials);
         } else {
-            Serial.println("No Credentials");
+            log_w("[WiFiManager] No stored credentials found");
             return false;
         }
     }
@@ -230,7 +260,7 @@ namespace CCABN {
             status = WIFI_DISCONNECTED;
             // Clear network cache when exiting AP mode
             clearNetworkCache();
-            Serial.println("Access Point stopped");
+            log_i("[WiFiManager] Access Point stopped");
         }
     }
 
@@ -255,8 +285,24 @@ namespace CCABN {
         const String ssid = server->arg("ssid");
         const String password = server->arg("password");
 
+        // Input validation
         if (ssid.length() == 0) {
-            server->send(400, "application/json", R"({"success":false,"error":"SSID is required"})");
+            server->send(400, "application/json", "{\"success\":false,\"error\":\"SSID is required\"}");
+            return;
+        }
+
+        if (ssid.length() > 32) {
+            server->send(400, "application/json", "{\"success\":false,\"error\":\"SSID too long (max 32 characters)\"}");
+            return;
+        }
+
+        if (password.length() > 64) {
+            server->send(400, "application/json", "{\"success\":false,\"error\":\"Password too long (max 64 characters)\"}");
+            return;
+        }
+
+        if (password.length() > 0 && password.length() < 8) {
+            server->send(400, "application/json", "{\"success\":false,\"error\":\"Password must be at least 8 characters\"}");
             return;
         }
 
@@ -270,7 +316,7 @@ namespace CCABN {
         saveCredentials(newCreds);
 
         // Send JSON success response
-        const String jsonResponse = R"({"success":true,"ssid":")" + ssid + R"(","password":")" + password + "\"}";
+        const String jsonResponse = "{\"success\":true,\"ssid\":\"" + ssid + "\",\"password\":\"" + password + "\"}";
         server->send(200, "application/json", jsonResponse);
     }
 
@@ -281,17 +327,7 @@ namespace CCABN {
                        (server->method() == HTTP_PUT) ? "PUT" :
                        (server->method() == HTTP_DELETE) ? "DELETE" : "UNKNOWN";
 
-        Serial.println("[WiFiManager] Unhandled request: " + method + " " + server->uri());
-        Serial.println("[WiFiManager] Headers: " + String(server->headers()));
-        for (int i = 0; i < server->headers(); i++) {
-            Serial.println("[WiFiManager]   " + server->headerName(i) + ": " + server->header(i));
-        }
-        Serial.println("[WiFiManager] Args: " + String(server->args()));
-        for (int i = 0; i < server->args(); i++) {
-            Serial.println("[WiFiManager]   " + server->argName(i) + " = " + server->arg(i));
-        }
-        Serial.println("[WiFiManager] Client IP: " + server->client().remoteIP().toString());
-        Serial.println("---");
+        log_d("[WiFiManager] Unhandled request: %s %s from %s", method.c_str(), server->uri().c_str(), server->client().remoteIP().toString().c_str());
 
         // Redirect to root for captive portal
         server->sendHeader("Location", "http://" + WiFi.softAPIP().toString(), true);
@@ -301,7 +337,7 @@ namespace CCABN {
     String WiFiManager::scanNetworks() {
         String networksHtml = "";
 
-        Serial.println("Scanning networks...");
+        log_i("[WiFiManager] Scanning for networks...");
         const int numNetworks = WiFi.scanNetworks();
 
         if (numNetworks == 0) {
@@ -343,8 +379,11 @@ namespace CCABN {
             }
         }
 
-        { // Brackets for collapse fuctionality
-            // Fallback to basic HTML if file not found
+        // Fallback to basic HTML if file not found
+        return getFallbackHTML();
+    }
+
+    String WiFiManager::getFallbackHTML() {
             String html = "<!DOCTYPE html><html><head><title>Fallback Page</title>";
             html += "<style>";
             html += "body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }";
@@ -420,7 +459,6 @@ namespace CCABN {
             html += "</body></html>";
 
             return html;
-        }
     }
 
     void WiFiManager::loop() {
@@ -444,12 +482,12 @@ namespace CCABN {
         credentials.exists = false;
         credentials.hasPassword = false;
 
-        Serial.println("[WiFiManager] WiFi credentials cleared");
+        log_i("[WiFiManager] WiFi credentials cleared");
     }
 
     void WiFiManager::startBackgroundScan() {
         if (!scanInProgress && apMode) {
-            Serial.println("[WiFiManager] Starting background WiFi scan");
+            log_d("[WiFiManager] Starting background WiFi scan");
 
             // Set scanning state immediately
             scanInProgress = true;
@@ -459,9 +497,8 @@ namespace CCABN {
             int syncResult = WiFi.scanNetworks(false, false, false, 200); // 200ms per channel max
 
             if (syncResult >= 0) {
-                Serial.println("[WiFiManager] Background scan completed, found " + String(syncResult) + " networks");
+                log_i("[WiFiManager] Background scan completed, found %d networks", syncResult);
                 scanComplete = true;
-                lastNetworkCount = syncResult;
 
                 // Build the cached networks HTML
                 cachedNetworksHtml = buildNetworksHtml();
@@ -470,15 +507,15 @@ namespace CCABN {
                 // Reset scan interval to normal on success
                 scanInterval = 15000; // Scan every 15 seconds when working
             } else if (syncResult == WIFI_SCAN_FAILED) {
-                Serial.println("[WiFiManager] Background scan failed - will retry less frequently");
+                log_w("[WiFiManager] Background scan failed - will retry less frequently");
                 scanComplete = false;
                 lastScanTime = millis();
 
                 // Increase retry interval on failure, max 60 seconds
                 scanInterval = min(scanInterval * 2, 60000UL);
-                Serial.println("[WiFiManager] Next scan retry in " + String(scanInterval/1000) + " seconds");
+                log_d("[WiFiManager] Next scan retry in %lu seconds", scanInterval/1000);
             } else {
-                Serial.println("[WiFiManager] Unexpected scan result: " + String(syncResult));
+                log_w("[WiFiManager] Unexpected scan result: %d", syncResult);
                 scanComplete = false;
                 lastScanTime = millis();
             }
@@ -491,7 +528,7 @@ namespace CCABN {
     void WiFiManager::checkScanStatus() {
         // Check for first scheduled scan
         if (firstScanPending && !scanInProgress && millis() >= firstScanScheduledTime) {
-            Serial.println("[WiFiManager] Triggering first scheduled WiFi scan");
+            log_d("[WiFiManager] Triggering first scheduled WiFi scan");
             firstScanPending = false;
             startBackgroundScan();
             return;
@@ -500,7 +537,7 @@ namespace CCABN {
         // Check for regular interval-based scans
         if (!scanInProgress && !firstScanPending && lastScanTime > 0 &&
             millis() > lastScanTime && (millis() - lastScanTime) > scanInterval) {
-            Serial.println("[WiFiManager] Triggering interval-based WiFi scan");
+            log_d("[WiFiManager] Triggering interval-based WiFi scan");
             startBackgroundScan();
         }
     }
@@ -537,7 +574,7 @@ namespace CCABN {
         // AJAX endpoint to get current network scan results
         // If called manually (with 'refresh' parameter), trigger a new scan
         if (server->hasArg("refresh") && !scanInProgress) {
-            Serial.println("[WiFiManager] Manual refresh requested, starting scan");
+            log_i("[WiFiManager] Manual refresh requested, starting scan");
             startBackgroundScan();
         }
 
@@ -548,7 +585,7 @@ namespace CCABN {
         } else if (scanComplete) {
             response = cachedNetworksHtml;
         } else {
-            response = "<div class='no-networks'>Scanning for networks...</div>";
+            response = "<div class='no-networks'>No Networks</div>";
         }
 
         server->send(200, "text/html", response);
@@ -576,7 +613,7 @@ namespace CCABN {
         cachedNetworks.clear();
         cachedNetworksHtml = "";
         scanComplete = false;
-        Serial.println("[WiFiManager] Network cache cleared");
+        log_d("[WiFiManager] Network cache cleared");
     }
 
     void WiFiManager::handleStaticFile() const {
@@ -604,14 +641,18 @@ namespace CCABN {
             if (file) {
                 server->streamFile(file, contentType);
                 file.close();
-                Serial.println("[WiFiManager] Served static file: " + path);
+                log_d("[WiFiManager] Served static file: %s", path.c_str());
                 return;
             }
         }
 
         // File not found
-        Serial.println("[WiFiManager] Static file not found: " + path);
+        log_w("[WiFiManager] Static file not found: %s", path.c_str());
         server->send(404, "text/plain", "File not found");
+    }
+
+    void WiFiManager::setConnectionCallback(WiFiConnectionCallback callback) {
+        connectionCallback = callback;
     }
 
 }

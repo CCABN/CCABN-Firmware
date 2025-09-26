@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include "wifi_manager.h"
 #include <WiFi.h>
+#include <esp_log.h>
 
 using namespace CCABN;
 
@@ -11,37 +12,30 @@ void setup() {
     // Gives time for serial monitor to connect
     // delay(10000);
 
-    Serial.println("==========Serial Monitor Started==========");
+    log_i("[Main] CCABN Firmware started");
 
     String mac = WiFi.macAddress();
     mac.replace(":", "");
     const String macSuffix = mac.substring(0, 6);
-    wifiManager.apName = ("CCABN_TRACKER_" + macSuffix).c_str();
-
-    // Clear credentials to force reconfiguration
-    wifiManager.clearCredentials();
+    wifiManager.apName = "CCABN_TRACKER_" + macSuffix;
 
     WiFiCredentials credentials = wifiManager.getCredentials();
 
     while (wifiManager.status != WIFI_CONNECTED) {
         if (credentials.exists) {
-            Serial.println("Connecting to WiFi");
+            log_i("[Main] Attempting to connect to stored WiFi network");
             const bool connected = wifiManager.connectToWiFi(credentials);
             if (!connected) {
-                Serial.println("Failed to connect. Please check credentials.");
+                log_e("[Main] Failed to connect with stored credentials");
             }
         } else {
-            Serial.println("No WiFi Credentials Found");
-            Serial.println("Starting Access Point");
+            log_i("[Main] No WiFi credentials found");
+            log_i("[Main] Starting Access Point for configuration");
+
+            // startAP() now blocks until credentials are received (no timeout)
             wifiManager.startAP();
 
-            // Wait for credentials to be configured via captive portal
-            Serial.println("Waiting for WiFi configuration via captive portal...");
-            while (wifiManager.status == WIFI_AP_MODE) {
-                wifiManager.loop();
-                delay(100);
-            }
-
+            log_i("[Main] Credentials received, attempting to connect");
             // Reload credentials after AP mode
             credentials = wifiManager.getCredentials();
         }
